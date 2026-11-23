@@ -124,6 +124,33 @@ export function TeacherPage() {
     return Array.from(map.entries());
   }, [submissions]);
 
+  const handleInspect = useCallback(async (subId: string) => {
+    setInspectLoading(true);
+    setFbSavedMsg(null);
+    try {
+      const { submission } = await fetchSubmissionDetail(subId);
+      setInspectSub(submission);
+      setFbTeacherNote(submission.teacherNote ?? '');
+      setFbAdjustedScore(submission.adjustedScore !== null ? String(submission.adjustedScore) : '');
+      setFbQuestionNotes(submission.questionNotes ?? {});
+      setSubmissions((prev) =>
+        prev.map((s) => (s.id === subId ? { ...s, reviewedAt: submission.reviewedAt ?? new Date().toISOString() } : s)),
+      );
+      void refreshNotifications();
+    } catch (err) {
+      alert((err as Error).message);
+    } finally {
+      setInspectLoading(false);
+    }
+  }, [refreshNotifications]);
+
+  useEffect(() => {
+    if (inspectParamId && !authLoading && user?.role === 'teacher') {
+      setActiveTab('results');
+      void handleInspect(inspectParamId);
+    }
+  }, [inspectParamId, authLoading, user, handleInspect]);
+
   if (authLoading) {
     return <div className="container"><div className="panel">Đang kiểm tra tài khoản...</div></div>;
   }
@@ -208,26 +235,6 @@ export function TeacherPage() {
     }
   };
 
-  const handleInspect = useCallback(async (subId: string) => {
-    setInspectLoading(true);
-    setFbSavedMsg(null);
-    try {
-      const { submission } = await fetchSubmissionDetail(subId);
-      setInspectSub(submission);
-      setFbTeacherNote(submission.teacherNote ?? '');
-      setFbAdjustedScore(submission.adjustedScore !== null ? String(submission.adjustedScore) : '');
-      setFbQuestionNotes(submission.questionNotes ?? {});
-      setSubmissions((prev) =>
-        prev.map((s) => (s.id === subId ? { ...s, reviewedAt: submission.reviewedAt ?? new Date().toISOString() } : s)),
-      );
-      void refreshNotifications();
-    } catch (err) {
-      alert((err as Error).message);
-    } finally {
-      setInspectLoading(false);
-    }
-  }, [refreshNotifications]);
-
   const handleSaveFeedback = async (publishResult: boolean) => {
     if (!inspectSub) return;
     setFbSaving(true);
@@ -253,13 +260,6 @@ export function TeacherPage() {
       setFbSaving(false);
     }
   };
-
-  useEffect(() => {
-    if (inspectParamId && !authLoading && user?.role === 'teacher') {
-      setActiveTab('results');
-      void handleInspect(inspectParamId);
-    }
-  }, [inspectParamId, authLoading, user, handleInspect]);
 
   const handleMarkAllReviewed = async () => {
     try {
