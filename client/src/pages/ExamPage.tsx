@@ -19,7 +19,6 @@ import { generateCustomMathExam } from '../content';
 import { apiSaveSubmission, fetchStudentDashboard } from '../lib/api';
 import { useAuth } from '../lib/authContext';
 import { useExams } from '../lib/examStore';
-import { clearDraft, loadDraft, recordAttempt, saveDraft } from '../lib/storage';
 
 function formatTime(sec: number): string {
   const s = Math.max(0, Math.floor(sec));
@@ -56,16 +55,12 @@ export function ExamPage() {
     return undefined;
   }, [params.examId, params.grade, params.seed, getExam]);
 
-  const initialDraft = useMemo(() => (exam ? loadDraft(exam.id) : null), [exam]);
-
-  const [mode, setMode] = useState<'exam' | 'practice'>(assignmentId ? 'exam' : (initialDraft?.mode ?? modeParam));
-  const [answers, setAnswers] = useState<Record<string, UserAnswer>>(initialDraft?.answers ?? {});
-  const [flagged, setFlagged] = useState<string[]>(initialDraft?.flagged ?? []);
+  const [mode, setMode] = useState<'exam' | 'practice'>(assignmentId ? 'exam' : modeParam);
+  const [answers, setAnswers] = useState<Record<string, UserAnswer>>({});
+  const [flagged, setFlagged] = useState<string[]>([]);
   const [checkedPracticeIds, setCheckedPracticeIds] = useState<Record<string, boolean>>({});
-  const [startedAt, setStartedAt] = useState<number>(initialDraft?.startedAt ?? Date.now());
-  const [remainingSeconds, setRemainingSeconds] = useState<number>(
-    initialDraft?.remainingSeconds ?? (exam ? exam.durationMinutes * 60 : 900),
-  );
+  const [startedAt, setStartedAt] = useState<number>(() => Date.now());
+  const [remainingSeconds, setRemainingSeconds] = useState<number>(exam ? exam.durationMinutes * 60 : 900);
   const [submitted, setSubmitted] = useState(false);
   const [resultPublished, setResultPublished] = useState(true);
   const [syncSaved, setSyncSaved] = useState<'idle' | 'saved' | 'error'>('idle');
@@ -110,19 +105,6 @@ export function ExamPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [remainingSeconds]);
-
-  useEffect(() => {
-    if (!exam || submitted) return;
-    saveDraft({
-      examId: exam.id,
-      mode,
-      startedAt,
-      remainingSeconds,
-      answers,
-      flagged,
-      updatedAt: Date.now(),
-    });
-  }, [exam, submitted, mode, startedAt, remainingSeconds, answers, flagged]);
 
   const graded = useMemo(() => (exam ? gradeExam(exam, answers) : null), [exam, answers]);
 
@@ -183,25 +165,8 @@ export function ExamPage() {
     if (submitted) return;
     setShowConfirmModal(false);
     setSubmitted(true);
-    clearDraft(exam.id);
 
     const elapsed = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
-    recordAttempt({
-      id: `${exam.id}-${Date.now()}`,
-      examId: exam.id,
-      subjectId: exam.subjectId,
-      grade: exam.grade,
-      examTitle: exam.title,
-      category: exam.category,
-      mode,
-      startedAt,
-      submittedAt: Date.now(),
-      durationSeconds: elapsed,
-      score: graded.score,
-      correctCount: graded.correctCount,
-      totalQuestions: exam.questions.length,
-      answers,
-    });
 
     if (user) {
       apiSaveSubmission({
@@ -229,7 +194,6 @@ export function ExamPage() {
   };
 
   const handleRetry = () => {
-    clearDraft(exam.id);
     setAnswers({});
     setFlagged([]);
     setCheckedPracticeIds({});

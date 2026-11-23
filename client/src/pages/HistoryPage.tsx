@@ -1,4 +1,4 @@
-import { Eye, Trash2, X } from 'lucide-react';
+import { Eye, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { gradeExam } from '@shared/scoring';
@@ -8,7 +8,6 @@ import { QuestionCard } from '../components/QuestionCard';
 import { fetchStudentDashboard, fetchStudentSubmissionDetail } from '../lib/api';
 import { useAuth } from '../lib/authContext';
 import { useExams } from '../lib/examStore';
-import { clearProgress, loadProgress } from '../lib/storage';
 
 function formatDuration(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -19,24 +18,27 @@ function formatDuration(sec: number): string {
 export function HistoryPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { getExam } = useExams();
 
   const viewParam = searchParams.get('xem') ?? '';
 
-  const [localProgress, setLocalProgress] = useState(() => loadProgress());
-  const [serverSubs, setServerSubs] = useState<SubmissionRecord[] | null>(null);
+  const [serverSubs, setServerSubs] = useState<SubmissionRecord[]>([]);
+  const [loading, setLoading] = useState(true);
   const [gradeFilter, setGradeFilter] = useState<'all' | GradeLevel>('all');
   const [viewSub, setViewSub] = useState<SubmissionRecord | null>(null);
 
   useEffect(() => {
     if (!user) {
-      setServerSubs(null);
+      setServerSubs([]);
+      setLoading(false);
       return;
     }
+    setLoading(true);
     fetchStudentDashboard()
       .then((d) => setServerSubs(d.submissions))
-      .catch(() => setServerSubs(null));
+      .catch(() => setServerSubs([]))
+      .finally(() => setLoading(false));
   }, [user]);
 
   const openSubmission = useCallback(async (id: string) => {
@@ -55,38 +57,48 @@ export function HistoryPage() {
   }, [viewParam, user, openSubmission]);
 
   const rows = useMemo(() => {
-    const list = serverSubs
-      ? serverSubs.map((s) => ({
-          id: s.id,
-          examId: s.examId,
-          examTitle: s.examTitle,
-          grade: s.grade,
-          category: s.category,
-          score: s.adjustedScore ?? s.score,
-          correctCount: s.correctCount,
-          totalQuestions: s.totalQuestions,
-          durationSeconds: s.durationSeconds,
-          submittedAt: new Date(s.submittedAt).getTime(),
-          hasFeedback: Boolean(s.feedbackAt),
-          isPublished: Boolean(s.publishedAt),
-          fromServer: true,
-        }))
-      : localProgress.attempts.map((a) => ({
-          ...a,
-          hasFeedback: false,
-          isPublished: true,
-          fromServer: false,
-        }));
-
+    const list = serverSubs.map((s) => ({
+      id: s.id,
+      examId: s.examId,
+      examTitle: s.examTitle,
+      grade: s.grade,
+      category: s.category,
+      score: s.adjustedScore ?? s.score,
+      correctCount: s.correctCount,
+      totalQuestions: s.totalQuestions,
+      durationSeconds: s.durationSeconds,
+      submittedAt: new Date(s.submittedAt).getTime(),
+      hasFeedback: Boolean(s.feedbackAt),
+      isPublished: Boolean(s.publishedAt),
+    }));
     return gradeFilter === 'all' ? list : list.filter((a) => a.grade === gradeFilter);
-  }, [serverSubs, localProgress, gradeFilter]);
+  }, [serverSubs, gradeFilter]);
 
   const stats = useMemo(() => {
-    if (rows.length === 0) return { count: 0, avg: 0, best: 0 };
-    const sum = rows.reduce((acc, a) => acc + a.score, 0);
-    const best = Math.max(...rows.map((a) => a.score));
-    return { count: rows.length, avg: sum / rows.length, best };
+    const pub = rows.filter((r) => r.isPublished);
+    if (pub.length === 0) return { count: rows.length, avg: 0, best: 0, publishedCount: 0 };
+    const sum = pub.reduce((acc, a) => acc + a.score, 0);
+    const best = Math.max(...pub.map((a) => a.score));
+    return { count: rows.length, avg: sum / pub.length, best, publishedCount: pub.length };
   }, [rows]);
+
+  if (authLoading) return <div className="container"><div className="panel">Đang tải...</div></div>;
+
+  if (!user) {
+    return (
+      <div className="container narrow-container">
+        <div className="panel">
+          <h1>Lịch sử làm bài</h1>
+          <p className="muted-text" style={{ marginBottom: 14 }}>
+            Vui lòng đăng nhập để xem lịch sử làm bài và phần chữa bài của gia sư.
+          </p>
+          <button type="button" className="btn-primary btn-sm" onClick={() => navigate('/dang-nhap')}>
+            Đăng nhập
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const viewExam = viewSub ? getExam(viewSub.examId) : undefined;
   const viewGraded = viewSub && viewExam && viewSub.answers ? gradeExam(viewExam, viewSub.answers) : null;
@@ -97,25 +109,9 @@ export function HistoryPage() {
         <div>
           <h1>Lịch sử làm bài</h1>
           <p className="muted-text">
-            {user
-              ? `Tài khoản ${user.fullName} — xem lại điểm số và phần gia sư chữa bài.`
-              : 'Lịch sử lưu trên trình duyệt này.'}
+            Tài khoản {user.fullName} — xem lại điểm số và phần gia sư chữa bài.
           </p>
         </div>
-        {!user && localProgress.attempts.length > 0 && (
-          <button
-            type="button"
-            className="btn-secondary btn-sm"
-            onClick={() => {
-              if (window.confirm('Xóa lịch sử làm bài trên trình duyệt này?')) {
-                clearProgress();
-                setLocalProgress(loadProgress());
-              }
-            }}
-          >
-            <Trash2 size={15} /> Xóa lịch sử
-          </button>
-        )}
       </div>
 
       <div className="stats-row">
@@ -125,11 +121,11 @@ export function HistoryPage() {
         </div>
         <div className="stat-card">
           <small>Điểm trung bình</small>
-          <strong>{stats.count ? stats.avg.toFixed(2) : '—'}</strong>
+          <strong>{stats.publishedCount ? stats.avg.toFixed(2) : '—'}</strong>
         </div>
         <div className="stat-card">
           <small>Điểm cao nhất</small>
-          <strong>{stats.count ? `${stats.best.toFixed(2)}` : '—'}</strong>
+          <strong>{stats.publishedCount ? stats.best.toFixed(2) : '—'}</strong>
         </div>
       </div>
 
@@ -153,7 +149,9 @@ export function HistoryPage() {
         ))}
       </div>
 
-      {rows.length === 0 ? (
+      {loading ? (
+        <div className="panel">Đang tải lịch sử...</div>
+      ) : rows.length === 0 ? (
         <div className="panel empty-inline">
           <p>Chưa có bài làm nào.</p>
           <button type="button" className="btn-primary btn-sm" onClick={() => navigate('/')}>
@@ -199,7 +197,7 @@ export function HistoryPage() {
                   <td className="cell-nowrap">{new Date(att.submittedAt).toLocaleString('vi-VN')}</td>
                   <td>
                     <div style={{ display: 'flex', gap: 6 }}>
-                      {att.fromServer && att.isPublished && (
+                      {att.isPublished && (
                         <button
                           type="button"
                           className="btn-secondary btn-sm"
@@ -226,7 +224,6 @@ export function HistoryPage() {
         </div>
       )}
 
-      {/* MODAL XEM BÀI ĐÃ NỘP & LỜI PHÊ CỦA GIA SƯ */}
       {viewSub && (
         <div className="modal-backdrop" onClick={() => setViewSub(null)}>
           <div className="inspect-modal" onClick={(e) => e.stopPropagation()}>
@@ -237,7 +234,7 @@ export function HistoryPage() {
                   Điểm: <strong>{(viewSub.adjustedScore ?? viewSub.score).toFixed(2)}/10</strong> · Đúng {viewSub.correctCount}/{viewSub.totalQuestions} câu
                 </div>
               </div>
-              <button type="button" className="icon-btn" onClick={() => setViewSub(null)}>
+              <button type="button" className="icon-btn" onClick={() => setViewSub(null)} aria-label="Đóng">
                 <X size={18} />
               </button>
             </div>

@@ -14,7 +14,6 @@ import { SUBJECTS } from '../content';
 import { apiDeleteOrHideExam, fetchStudentDashboard } from '../lib/api';
 import { useAuth } from '../lib/authContext';
 import { useExams } from '../lib/examStore';
-import { loadDraft, loadProgress } from '../lib/storage';
 
 const GRADES: GradeLevel[] = [6, 7, 8, 9];
 const CATEGORIES: Array<{ id: 'all' | ExamCategory; label: string }> = [
@@ -31,11 +30,7 @@ export function HomePage() {
   const { allExams, getExamsBySubjectGrade, isBuiltIn, isCustom, isOverridden, reloadExams } = useExams();
 
   const [subjectId, setSubjectId] = useState<SubjectId>('toan');
-  const [grade, setGrade] = useState<GradeLevel>(() => {
-    if (user?.grade) return user.grade;
-    const saved = Number(localStorage.getItem('luyende_grade'));
-    return saved === 6 || saved === 7 || saved === 8 || saved === 9 ? saved : 6;
-  });
+  const [grade, setGrade] = useState<GradeLevel>(() => user?.grade ?? 6);
   const [category, setCategory] = useState<'all' | ExamCategory>('all');
   const [textbook, setTextbook] = useState<'all' | TextbookSeries>('all');
   const [query, setQuery] = useState('');
@@ -57,17 +52,6 @@ export function HomePage() {
     void loadStudentData();
   }, [user, loadStudentData]);
 
-  const progress = useMemo(() => loadProgress(), []);
-
-  const bestScoreByExam = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const att of progress.attempts) {
-      const prev = map.get(att.examId);
-      if (prev === undefined || att.score > prev) map.set(att.examId, att.score);
-    }
-    return map;
-  }, [progress]);
-
   const exams = useMemo(() => getExamsBySubjectGrade(subjectId, grade), [getExamsBySubjectGrade, subjectId, grade]);
 
   const filteredExams = useMemo(() => {
@@ -85,7 +69,6 @@ export function HomePage() {
 
   const handleSelectGrade = (g: GradeLevel) => {
     setGrade(g);
-    localStorage.setItem('luyende_grade', String(g));
   };
 
   const handleRandomExam = () => {
@@ -391,10 +374,7 @@ export function HomePage() {
           <div className="panel empty-inline">Không có đề phù hợp với bộ lọc hiện tại.</div>
         ) : (
           <div className="exam-grid">
-            {filteredExams.map((exam) => {
-              const best = bestScoreByExam.get(exam.id);
-              const draft = loadDraft(exam.id);
-              return (
+            {filteredExams.map((exam) => (
                 <article key={exam.id} className="exam-card">
                   <div className="exam-card-top" style={{ justifyContent: 'space-between' }}>
                     <div className="exam-badges">
@@ -408,7 +388,7 @@ export function HomePage() {
                       <button
                         type="button"
                         className="icon-btn"
-                        style={{ width: 30, height: 30 }}
+                        style={{ width: 32, height: 32 }}
                         title="Xóa đề này"
                         aria-label="Xóa đề này"
                         onClick={() => void handleDeleteExam(exam.id, exam.title)}
@@ -426,14 +406,7 @@ export function HomePage() {
                       <Clock size={13} /> {exam.durationMinutes} phút
                     </span>
                     <span>{exam.questions.length} câu</span>
-                    {best !== undefined && <span className="best-score">Cao nhất: {best.toFixed(2)}đ</span>}
                   </div>
-
-                  {draft && (
-                    <div className="draft-note">
-                      Đang làm dở ({Object.keys(draft.answers).length}/{exam.questions.length} câu)
-                    </div>
-                  )}
 
                   <div className={user?.role === 'teacher' ? 'exam-card-actions teacher-3' : 'exam-card-actions'}>
                     <button
@@ -441,7 +414,7 @@ export function HomePage() {
                       className="btn-primary btn-sm"
                       onClick={() => navigate(`/de/${exam.id}?mode=exam`)}
                     >
-                      {draft ? 'Làm tiếp' : 'Làm bài'}
+                      Xem / Làm
                     </button>
                     {user?.role === 'teacher' ? (
                       <>
@@ -471,8 +444,7 @@ export function HomePage() {
                     )}
                   </div>
                 </article>
-              );
-            })}
+              ))}
           </div>
         )}
       </section>

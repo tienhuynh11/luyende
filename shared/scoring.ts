@@ -1,4 +1,4 @@
-import type { Exam, ExamAttempt, Question, QuestionResult, UserAnswer, UserProgress } from './types.js';
+import type { Exam, Question, QuestionResult, UserAnswer } from './types.js';
 
 export function normalizeShortAnswer(raw: string): string {
   return raw
@@ -136,28 +136,5 @@ export function gradeExam(exam: Exam, answers: Record<string, UserAnswer>) {
     answeredCount,
     totalQuestions: exam.questions.length,
     results,
-  };
-}
-
-export function emptyProgress(): UserProgress {
-  return { version: 1, updatedAt: Date.now(), attempts: [] };
-}
-
-export function mergeProgress(a: UserProgress, b: UserProgress): UserProgress {
-  const map = new Map<string, ExamAttempt>();
-  for (const item of [...a.attempts, ...b.attempts]) {
-    const existing = map.get(item.id);
-    if (!existing || item.submittedAt > existing.submittedAt) {
-      map.set(item.id, item);
-    }
-  }
-  const attempts = Array.from(map.values())
-    .sort((x, y) => y.submittedAt - x.submittedAt)
-    .slice(0, 300);
-
-  return {
-    version: 1,
-    updatedAt: Math.max(a.updatedAt, b.updatedAt, Date.now()),
-    attempts,
   };
 }
