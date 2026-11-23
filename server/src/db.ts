@@ -5,6 +5,7 @@ import type {
   Exam,
   ExamCategory,
   GradeLevel,
+  NotificationItem,
   Question,
   StudentSummary,
   SubjectId,
@@ -100,9 +101,11 @@ export async function initDb(): Promise<boolean> {
       total_questions INT NOT NULL,
       duration_seconds INT NOT NULL,
       answers JSONB NOT NULL,
-      submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      reviewed_at TIMESTAMPTZ
     )
   `);
+  await pool.query(`ALTER TABLE luyende.submissions ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_submissions_student ON luyende.submissions(student_id)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_submissions_assignment ON luyende.submissions(assignment_id)`);
 
@@ -365,7 +368,7 @@ export async function getStudentDashboard(studentId: string): Promise<{
   const subRes = await db.query(
     `SELECT s.id, s.student_id, a.full_name AS student_name, a.username AS student_username,
             s.assignment_id, s.exam_id, s.exam_title, s.grade, s.category, s.mode,
-            s.score, s.correct_count, s.total_questions, s.duration_seconds, s.submitted_at
+            s.score, s.correct_count, s.total_questions, s.duration_seconds, s.submitted_at, s.reviewed_at
      FROM luyende.submissions s
      JOIN luyende.accounts a ON a.id = s.student_id
      WHERE s.student_id = $1
@@ -436,7 +439,7 @@ export async function getTeacherDashboard(teacherId: string): Promise<{
   const subRes = await db.query(
     `SELECT s.id, s.student_id, a.full_name AS student_name, a.username AS student_username,
             s.assignment_id, s.exam_id, s.exam_title, s.grade, s.category, s.mode,
-            s.score, s.correct_count, s.total_questions, s.duration_seconds, s.submitted_at
+            s.score, s.correct_count, s.total_questions, s.duration_seconds, s.submitted_at, s.reviewed_at
      FROM luyende.submissions s
      JOIN luyende.accounts a ON a.id = s.student_id
      WHERE a.role = 'student'
@@ -449,10 +452,14 @@ export async function getTeacherDashboard(teacherId: string): Promise<{
 
 export async function getSubmissionForTeacher(submissionId: string): Promise<SubmissionRecord | null> {
   const db = requirePool();
+  // Tự động đánh dấu đã xem khi gia sư mở xem bài làm
+  await db.query(`UPDATE luyende.submissions SET reviewed_at = COALESCE(reviewed_at, NOW()) WHERE id = $1`, [
+    submissionId,
+  ]);
   const res = await db.query(
     `SELECT s.id, s.student_id, a.full_name AS student_name, a.username AS student_username,
             s.assignment_id, s.exam_id, s.exam_title, s.grade, s.category, s.mode,
-            s.score, s.correct_count, s.total_questions, s.duration_seconds, s.answers, s.submitted_at
+            s.score, s.correct_count, s.total_questions, s.duration_seconds, s.answers, s.submitted_at, s.reviewed_at
      FROM luyende.submissions s
      JOIN luyende.accounts a ON a.id = s.student_id
      WHERE s.id = $1
@@ -465,6 +472,106 @@ export async function getSubmissionForTeacher(submissionId: string): Promise<Sub
     ...mapSubmissionRow(r),
     answers: r.answers as Record<string, UserAnswer>,
   };
+}
+
+export async function markAllSubmissionsReviewed(): Promise<void> {
+  const db = requirePool();
+  await db.query(`UPDATE luyende.submissions SET reviewed_at = NOW() WHERE reviewed_at IS NULL`);
+}
+
+export async function getNotificationsForUser(user: AccountPublic): Promise<NotificationItem[]> {
+  const db = requirePool();
+  const items: NotificationItem[] = [];
+
+  if (user.role === 'teacher') {
+    // 1. Bài làm mới học sinh nộp chưa xem
+    const unrev = await db.query(
+      `SELECT s.id, a.full_name AS student_name, s.exam_title, s.score, s.submitted_at
+       FROM luyende.submissions s
+       JOIN luyende.accounts a ON a.id = s.student_id
+       WHERE a.role = 'student' AND s.reviewed_at IS NULL
+       ORDER BY s.submitted_at DESC
+       LIMIT 20`,
+    );
+    for (const r of unrev.rows) {
+      items.push({
+        id: `sub-${r.id}`,
+        kind: 'new-submission',
+        title: `${r.student_name} vừa nộp bài (${Number(r.score).toFixed(2)}đ)`,
+        detail: r.exam_title,
+        link: `/giao-vien?inspect=${r.id}`,
+        urgent: false,
+        timestamp: r.submitted_at.toISOString(),
+        submissionId: r.id,
+      });
+    }
+
+    // 2. Bài đã giao quá hạn mà chưa có học sinh nào nộp
+    const overdue = await db.query(
+      `SELECT asg.id, asg.exam_title, asg.due_at, COALESCE(st.full_name, 'Học sinh') AS student_name
+       FROM luyende.assignments asg
+       LEFT JOIN luyende.accounts st ON st.id = asg.student_id
+       WHERE asg.teacher_id = $1
+         AND asg.due_at IS NOT NULL
+         AND asg.due_at < NOW()
+         AND NOT EXISTS (
+           SELECT 1 FROM luyende.submissions s
+           WHERE (s.assignment_id = asg.id OR s.exam_id = asg.exam_id)
+             AND (asg.student_id IS NULL OR s.student_id = asg.student_id)
+         )
+       ORDER BY asg.due_at DESC
+       LIMIT 10`,
+      [user.id],
+    );
+    for (const r of overdue.rows) {
+      items.push({
+        id: `ov-${r.id}`,
+        kind: 'overdue-assignment',
+        title: `${r.student_name} chưa nộp bài (đã quá hạn)`,
+        detail: r.exam_title,
+        link: '/giao-vien',
+        urgent: true,
+        timestamp: r.due_at.toISOString(),
+      });
+    }
+  } else {
+    // Học sinh: các đề giáo viên giao nhưng chưa nộp
+    const pending = await db.query(
+      `SELECT asg.id, asg.exam_id, asg.exam_title, asg.due_at, asg.created_at, asg.note
+       FROM luyende.assignments asg
+       WHERE (asg.student_id IS NULL OR asg.student_id = $1)
+         AND NOT EXISTS (
+           SELECT 1 FROM luyende.submissions s
+           WHERE s.student_id = $1 AND (s.assignment_id = asg.id OR s.exam_id = asg.exam_id)
+         )
+       ORDER BY asg.due_at ASC NULLS LAST, asg.created_at DESC
+       LIMIT 20`,
+      [user.id],
+    );
+    const now = Date.now();
+    for (const r of pending.rows) {
+      const dueMs = r.due_at ? new Date(r.due_at).getTime() : null;
+      const isOverdue = dueMs !== null && dueMs < now;
+      const isDueSoon = dueMs !== null && !isOverdue && dueMs - now < 24 * 60 * 60 * 1000;
+      items.push({
+        id: `asg-${r.id}`,
+        kind: isOverdue ? 'overdue-assignment' : 'pending-assignment',
+        title: isOverdue
+          ? `Quá hạn: ${r.exam_title}`
+          : isDueSoon
+            ? `Sắp hết hạn: ${r.exam_title}`
+            : `Bài mới cần làm: ${r.exam_title}`,
+        detail: r.due_at
+          ? `Hạn nộp: ${new Date(r.due_at).toLocaleString('vi-VN')}${r.note ? ` · ${r.note}` : ''}`
+          : r.note || 'Bấm để vào làm bài ngay',
+        link: `/de/${r.exam_id}?mode=exam&assignment=${r.id}`,
+        urgent: isOverdue || isDueSoon,
+        timestamp: (r.due_at ?? r.created_at).toISOString(),
+      });
+    }
+  }
+
+  return items;
 }
 
 // --- CUSTOM & EDITED EXAMS ---
@@ -610,5 +717,6 @@ function mapSubmissionRow(r: any): SubmissionRecord {
     totalQuestions: Number(r.total_questions),
     durationSeconds: Number(r.duration_seconds),
     submittedAt: r.submitted_at.toISOString(),
+    reviewedAt: r.reviewed_at ? r.reviewed_at.toISOString() : null,
   };
 }

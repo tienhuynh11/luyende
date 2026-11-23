@@ -1,13 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
-import type { AccountPublic } from '@shared/types';
-import { apiLogout, fetchConfig, fetchMe, type ServerConfig } from './api';
+import type { AccountPublic, NotificationItem } from '@shared/types';
+import { apiLogout, fetchConfig, fetchMe, fetchNotifications, type ServerConfig } from './api';
 
 interface AuthContextValue {
   user: AccountPublic | null;
   config: ServerConfig;
+  notifications: NotificationItem[];
   loading: boolean;
   setUser: (u: AccountPublic | null) => void;
   refresh: () => Promise<void>;
+  refreshNotifications: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -20,16 +22,40 @@ const defaultConfig: ServerConfig = {
 const AuthContext = createContext<AuthContextValue>({
   user: null,
   config: defaultConfig,
+  notifications: [],
   loading: true,
   setUser: () => {},
   refresh: async () => {},
+  refreshNotifications: async () => {},
   logout: async () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AccountPublic | null>(null);
+  const [user, setUserState] = useState<AccountPublic | null>(null);
   const [config, setConfig] = useState<ServerConfig>(defaultConfig);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const refreshNotifications = useCallback(async () => {
+    try {
+      const data = await fetchNotifications();
+      setNotifications(data.items);
+    } catch {
+      setNotifications([]);
+    }
+  }, []);
+
+  const setUser = useCallback(
+    (u: AccountPublic | null) => {
+      setUserState(u);
+      if (u) {
+        void refreshNotifications();
+      } else {
+        setNotifications([]);
+      }
+    },
+    [refreshNotifications],
+  );
 
   const refresh = useCallback(async () => {
     try {
@@ -37,12 +63,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setConfig(cfg);
       if (cfg.dbEnabled) {
         const me = await fetchMe();
-        setUser(me.user);
+        setUserState(me.user);
+        if (me.user) {
+          const n = await fetchNotifications().catch(() => ({ count: 0, items: [] as NotificationItem[] }));
+          setNotifications(n.items);
+        } else {
+          setNotifications([]);
+        }
       } else {
-        setUser(null);
+        setUserState(null);
+        setNotifications([]);
       }
     } catch {
-      setUser(null);
+      setUserState(null);
+      setNotifications([]);
     } finally {
       setLoading(false);
     }
@@ -58,11 +92,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // ignore
     }
-    setUser(null);
+    setUserState(null);
+    setNotifications([]);
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, config, loading, setUser, refresh, logout }}>
+    <AuthContext.Provider
+      value={{ user, config, notifications, loading, setUser, refresh, refreshNotifications, logout }}
+    >
       {children}
     </AuthContext.Provider>
   );

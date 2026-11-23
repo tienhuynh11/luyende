@@ -15,6 +15,7 @@ import {
   apiCreateStudent,
   apiDeleteAssignment,
   apiDeleteStudent,
+  apiMarkAllReviewed,
   fetchSubmissionDetail,
   fetchTeacherDashboard,
 } from '../lib/api';
@@ -30,10 +31,11 @@ function formatDuration(sec: number): string {
 export function TeacherPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, refreshNotifications } = useAuth();
   const { allExams, getExam } = useExams();
 
   const preselectExamId = searchParams.get('assign') ?? '';
+  const inspectParamId = searchParams.get('inspect') ?? '';
   const preselectExam = preselectExamId ? getExam(preselectExamId) : undefined;
 
   const [activeTab, setActiveTab] = useState<'results' | 'assignments' | 'students'>(
@@ -197,15 +199,37 @@ export function TeacherPage() {
     }
   };
 
-  const handleInspect = async (subId: string) => {
+  const handleInspect = useCallback(async (subId: string) => {
     setInspectLoading(true);
     try {
       const { submission } = await fetchSubmissionDetail(subId);
       setInspectSub(submission);
+      setSubmissions((prev) =>
+        prev.map((s) => (s.id === subId ? { ...s, reviewedAt: submission.reviewedAt ?? new Date().toISOString() } : s)),
+      );
+      void refreshNotifications();
     } catch (err) {
       alert((err as Error).message);
     } finally {
       setInspectLoading(false);
+    }
+  }, [refreshNotifications]);
+
+  useEffect(() => {
+    if (inspectParamId && !authLoading && user?.role === 'teacher') {
+      setActiveTab('results');
+      void handleInspect(inspectParamId);
+    }
+  }, [inspectParamId, authLoading, user, handleInspect]);
+
+  const handleMarkAllReviewed = async () => {
+    try {
+      await apiMarkAllReviewed();
+      const now = new Date().toISOString();
+      setSubmissions((prev) => prev.map((s) => ({ ...s, reviewedAt: s.reviewedAt ?? now })));
+      void refreshNotifications();
+    } catch (err) {
+      alert((err as Error).message);
     }
   };
 
@@ -301,11 +325,18 @@ export function TeacherPage() {
                 ))}
               </select>
             </div>
-            {filteredSubmissions.length > 0 && (
-              <button type="button" className="btn-secondary btn-sm" onClick={handleExportCsv}>
-                <Download size={15} /> Xuất Excel (CSV)
-              </button>
-            )}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {submissions.some((s) => !s.reviewedAt) && (
+                <button type="button" className="btn-secondary btn-sm" onClick={handleMarkAllReviewed}>
+                  Đánh dấu đã xem hết
+                </button>
+              )}
+              {filteredSubmissions.length > 0 && (
+                <button type="button" className="btn-secondary btn-sm" onClick={handleExportCsv}>
+                  <Download size={15} /> Xuất Excel (CSV)
+                </button>
+              )}
+            </div>
           </div>
 
           {filteredSubmissions.length === 0 ? (
@@ -328,9 +359,12 @@ export function TeacherPage() {
                 </thead>
                 <tbody>
                   {filteredSubmissions.map((s) => (
-                    <tr key={s.id}>
+                    <tr key={s.id} className={!s.reviewedAt ? 'row-unread' : ''}>
                       <td>
-                        <strong>{s.studentName}</strong>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <strong>{s.studentName}</strong>
+                          {!s.reviewedAt && <span className="tag">Mới</span>}
+                        </div>
                         <div className="cell-sub">{s.studentUsername}</div>
                       </td>
                       <td>

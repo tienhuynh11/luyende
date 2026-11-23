@@ -4,6 +4,7 @@ import type {
   Exam,
   ExamCategory,
   GradeLevel,
+  NotificationItem,
   StudentSummary,
   SubmissionRecord,
   UserAnswer,
@@ -156,4 +157,12 @@ export function apiDeleteOrHideExam(examId: string, mode: 'delete' | 'hide'): Pr
   return request(`/api/teacher/exams/${encodeURIComponent(examId)}?mode=${mode}`, {
     method: 'DELETE',
   });
+}
+
+export function fetchNotifications(): Promise<{ count: number; items: NotificationItem[] }> {
+  return request('/api/notifications');
+}
+
+export function apiMarkAllReviewed(): Promise<{ ok: boolean }> {
+  return request('/api/teacher/submissions/review-all', { method: 'POST' });
 }

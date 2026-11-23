@@ -40,7 +40,7 @@ export function ExamPage() {
   const navigate = useNavigate();
   const params = useParams<{ examId?: string; grade?: string; seed?: string }>();
   const [searchParams] = useSearchParams();
-  const { user } = useAuth();
+  const { user, refreshNotifications } = useAuth();
   const { getExam } = useExams();
 
   const modeParam = searchParams.get('mode') === 'practice' ? 'practice' : 'exam';
@@ -175,7 +175,10 @@ export function ExamPage() {
         durationSeconds: elapsed,
         answers,
       })
-        .then(() => setSyncSaved('saved'))
+        .then(() => {
+          setSyncSaved('saved');
+          void refreshNotifications();
+        })
         .catch(() => setSyncSaved('error'));
     }
 

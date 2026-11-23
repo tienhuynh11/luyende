@@ -1,6 +1,7 @@
-import { LogOut, Moon, Sun } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { Bell, LogOut, Moon, Sun } from 'lucide-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { apiMarkAllReviewed } from '../lib/api';
 import { useAuth } from '../lib/authContext';
 import type { ThemeMode } from '../lib/storage';
 
@@ -13,15 +14,41 @@ interface LayoutProps {
 export function Layout({ theme, onToggleTheme, children }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, config, logout } = useAuth();
+  const { user, config, notifications, refreshNotifications, logout } = useAuth();
+  const [notifOpen, setNotifOpen] = useState(false);
+  const notifRef = useRef<HTMLDivElement>(null);
 
   const isHome = location.pathname === '/';
   const isHistory = location.pathname === '/lich-su';
   const isTeacher = location.pathname === '/giao-vien';
 
+  useEffect(() => {
+    setNotifOpen(false);
+  }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    if (!notifOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setNotifOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [notifOpen]);
+
   const handleLogout = async () => {
     await logout();
     navigate('/');
+  };
+
+  const handleMarkAllRead = async () => {
+    try {
+      await apiMarkAllReviewed();
+      await refreshNotifications();
+    } catch {
+      // ignore
+    }
   };
 
   return (
@@ -43,11 +70,61 @@ export function Layout({ theme, onToggleTheme, children }: LayoutProps) {
             {user?.role === 'teacher' && (
               <Link to="/giao-vien" className={`nav-link ${isTeacher ? 'active' : ''}`}>
                 Giao bài & Điểm
+                {notifications.length > 0 && <span className="nav-count">{notifications.length}</span>}
               </Link>
             )}
             <Link to="/lich-su" className={`nav-link ${isHistory ? 'active' : ''}`}>
               Lịch sử
             </Link>
+
+            {config.dbEnabled && user && (
+              <div className="notif-wrap" ref={notifRef}>
+                <button
+                  type="button"
+                  className="icon-btn notif-btn"
+                  onClick={() => setNotifOpen((v) => !v)}
+                  title="Thông báo cần xử lý"
+                  aria-label="Thông báo cần xử lý"
+                >
+                  <Bell size={17} />
+                  {notifications.length > 0 && <span className="notif-badge">{notifications.length}</span>}
+                </button>
+
+                {notifOpen && (
+                  <div className="notif-dropdown">
+                    <div className="notif-drop-head">
+                      <strong>Cần xử lý ({notifications.length})</strong>
+                      {user.role === 'teacher' && notifications.some((n) => n.kind === 'new-submission') && (
+                        <button type="button" className="link-btn" style={{ fontSize: 12.5 }} onClick={handleMarkAllRead}>
+                          Đánh dấu đã xem
+                        </button>
+                      )}
+                    </div>
+
+                    {notifications.length === 0 ? (
+                      <div className="notif-empty">Không có việc nào cần xử lý lúc này.</div>
+                    ) : (
+                      <div className="notif-list">
+                        {notifications.map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            className={`notif-item ${item.urgent ? 'urgent' : ''}`}
+                            onClick={() => {
+                              setNotifOpen(false);
+                              navigate(item.link);
+                            }}
+                          >
+                            <div className="notif-title">{item.title}</div>
+                            <div className="notif-detail">{item.detail}</div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {config.dbEnabled && (
               user ? (

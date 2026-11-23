@@ -24,11 +24,13 @@ import {
   deleteStudentAccount,
   findAccountByUsername,
   getAccountBySessionToken,
+  getNotificationsForUser,
   getStudentDashboard,
   getSubmissionForTeacher,
   getTeacherDashboard,
   isDbEnabled,
   listStoredExams,
+  markAllSubmissionsReviewed,
   saveSubmission,
   upsertStoredExam,
 } from './db.js';
@@ -202,6 +204,12 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
     }
     const { user } = sess;
 
+    // Notifications for logged-in user (student or teacher)
+    if (path === '/api/notifications' && req.method === 'GET') {
+      const items = await getNotificationsForUser(user);
+      return sendJson(res, 200, { count: items.length, items });
+    }
+
     // Student dashboard
     if (path === '/api/student/dashboard' && req.method === 'GET') {
       const data = await getStudentDashboard(user.id);
@@ -324,6 +332,11 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
         const asgId = decodeURIComponent(path.slice('/api/teacher/assignments/'.length));
         const ok = await deleteAssignment(user.id, asgId);
         return ok ? sendJson(res, 200, { ok: true }) : sendJson(res, 404, { error: 'Không tìm thấy bài giao.' });
+      }
+
+      if (path === '/api/teacher/submissions/review-all' && req.method === 'POST') {
+        await markAllSubmissionsReviewed();
+        return sendJson(res, 200, { ok: true });
       }
 
       if (path.startsWith('/api/teacher/submissions/') && req.method === 'GET') {

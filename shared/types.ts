@@ -63,6 +63,18 @@ export interface SubmissionRecord {
   durationSeconds: number;
   answers?: Record<string, UserAnswer>;
   submittedAt: string;
+  reviewedAt: string | null;
+}
+
+export interface NotificationItem {
+  id: string;
+  kind: 'new-submission' | 'pending-assignment' | 'overdue-assignment';
+  title: string;
+  detail: string;
+  link: string;
+  urgent: boolean;
+  timestamp: string;
+  submissionId?: string;
 }
 
 export interface SubjectMeta {

@@ -27,7 +27,7 @@ const CATEGORIES: Array<{ id: 'all' | ExamCategory; label: string }> = [
 
 export function HomePage() {
   const navigate = useNavigate();
-  const { user, config } = useAuth();
+  const { user, config, notifications } = useAuth();
   const { allExams, getExamsBySubjectGrade, isCustom, isOverridden } = useExams();
 
   const [subjectId, setSubjectId] = useState<SubjectId>('toan');
@@ -95,16 +95,54 @@ export function HomePage() {
 
   return (
     <div className="container">
-      {/* Khu vực tài khoản / Bài được giao */}
+      {/* Khu vực tài khoản / Thông báo cần xử lý */}
       {user?.role === 'teacher' && (
-        <section className="notice-bar">
-          <div>
-            <strong>Giáo viên: {user.fullName}</strong>
-            <span className="muted-inline"> — Giao đề trực tiếp cho học sinh, sửa đề và xem điểm.</span>
+        <section className="panel student-board">
+          <div className="board-head">
+            <div>
+              <h2>
+                {notifications.length > 0
+                  ? `Cần xử lý (${notifications.length})`
+                  : `Giáo viên: ${user.fullName}`}
+              </h2>
+              <div className="muted-text">
+                {notifications.length > 0
+                  ? 'Học sinh có bài mới nộp hoặc bài đã quá hạn.'
+                  : 'Hiện chưa có bài nộp mới nào cần xem.'}
+              </div>
+            </div>
+            <Link to="/giao-vien" className="btn-primary btn-sm">
+              Giao bài & Xem điểm
+            </Link>
           </div>
-          <Link to="/giao-vien" className="btn-primary btn-sm">
-            Giao bài & Xem điểm
-          </Link>
+
+          {notifications.length > 0 && (
+            <div className="assignment-list">
+              {notifications.slice(0, 5).map((item) => (
+                <div key={item.id} className="assignment-row">
+                  <div className="assignment-info">
+                    <div className="assignment-meta">
+                      <span className={item.urgent ? 'tag-urgent' : 'tag'}>
+                        {item.kind === 'new-submission' ? 'Bài mới nộp' : 'Quá hạn'}
+                      </span>
+                      <span className="muted-inline">
+                        {new Date(item.timestamp).toLocaleString('vi-VN')}
+                      </span>
+                    </div>
+                    <strong>{item.title}</strong>
+                    <div className="cell-sub">{item.detail}</div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-secondary btn-sm"
+                    onClick={() => navigate(item.link)}
+                  >
+                    Xem ngay
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       )}
 
