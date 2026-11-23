@@ -1,4 +1,4 @@
-# Quy tắc dự án LuyệnĐề THCS
+# Quy tắc dự án Góc Ôn Tập
 
 ## 1. Mục đích cốt lõi
 - Nền tảng dành cho **Gia sư / Giáo viên** giao bài tập trắc nghiệm, biên soạn bộ lý thuyết, chấm chữa bài chi tiết và **dạy học trực tiếp** (bảng trắng + up ảnh đề + trao đổi) cho học sinh THCS (Lớp 6–9, chương trình GDPT 2018).
@@ -14,7 +14,7 @@
 - **Phòng dạy trực tiếp**: học sinh không được vào xem bảng/chat khi gia sư chưa bấm **Mở phòng**; server tự làm sạch payload gửi cho học sinh khi phòng đóng.
 - Mật khẩu dùng `scrypt` + salt riêng + `timingSafeEqual`; phiên dùng cookie `HttpOnly; SameSite=Lax; Secure` lưu bản băm SHA-256; có rate limiting cho đăng nhập/đăng ký.
 
-## 4. Quy tắc UI/UX (theo `ui-ux-pro-max` — Minimalism & Swiss Style)
+## 4. Quy tắc UI/UX (theo `ui-ux-pro-max` - Minimalism & Swiss Style)
 - **Không làm giao diện kiểu AI**: không banner quảng cáo lấp lánh, không emoji thay icon, không hiệu ứng nhảy giật làm lệch layout.
 - **Tối ưu cả Desktop (PC) và Mobile**:
   - Breakpoints chuẩn: `375px` (điện thoại nhỏ), `768px` (tablet/mobile nav), `1024px`, `1440px`.

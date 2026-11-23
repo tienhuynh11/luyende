@@ -34,7 +34,7 @@ function requirePool(): pg.Pool {
 export async function initDb(): Promise<boolean> {
   const url = process.env.DATABASE_URL?.trim();
   if (!url) {
-    console.log('[db] Không có DATABASE_URL — chỉ chạy chế độ luyện tập cục bộ.');
+    console.log('[db] Không có DATABASE_URL - chỉ chạy chế độ luyện tập cục bộ.');
     return false;
   }
 

@@ -109,7 +109,7 @@ export function HistoryPage() {
         <div>
           <h1>Lịch sử làm bài</h1>
           <p className="muted-text">
-            Tài khoản {user.fullName} — xem lại điểm số và phần gia sư chữa bài.
+            Tài khoản {user.fullName} - xem lại điểm số và phần gia sư chữa bài.
           </p>
         </div>
       </div>
@@ -121,11 +121,11 @@ export function HistoryPage() {
         </div>
         <div className="stat-card">
           <small>Điểm trung bình</small>
-          <strong>{stats.publishedCount ? stats.avg.toFixed(2) : '—'}</strong>
+          <strong>{stats.publishedCount ? stats.avg.toFixed(2) : '-'}</strong>
         </div>
         <div className="stat-card">
           <small>Điểm cao nhất</small>
-          <strong>{stats.publishedCount ? stats.best.toFixed(2) : '—'}</strong>
+          <strong>{stats.publishedCount ? stats.best.toFixed(2) : '-'}</strong>
         </div>
       </div>
 
@@ -192,7 +192,7 @@ export function HistoryPage() {
                       <span className="book-badge">Chờ chấm</span>
                     )}
                   </td>
-                  <td>{att.isPublished ? `${att.correctCount}/${att.totalQuestions}` : '—'}</td>
+                  <td>{att.isPublished ? `${att.correctCount}/${att.totalQuestions}` : '-'}</td>
                   <td>{formatDuration(att.durationSeconds)}</td>
                   <td className="cell-nowrap">{new Date(att.submittedAt).toLocaleString('vi-VN')}</td>
                   <td>

@@ -675,9 +675,9 @@ export function TeacherPage() {
                       <tr key={st.id}>
                         <td><strong>{st.fullName}</strong></td>
                         <td><code>{st.username}</code></td>
-                        <td>{st.grade ? `Lớp ${st.grade}` : '—'}</td>
+                        <td>{st.grade ? `Lớp ${st.grade}` : '-'}</td>
                         <td>{st.submissionCount}</td>
-                        <td>{st.avgScore !== null ? st.avgScore.toFixed(2) : '—'}</td>
+                        <td>{st.avgScore !== null ? st.avgScore.toFixed(2) : '-'}</td>
                         <td>
                           <button
                             type="button"
@@ -704,7 +704,7 @@ export function TeacherPage() {
           <div className="inspect-modal" onClick={(e) => e.stopPropagation()}>
             <div className="inspect-head">
               <div>
-                <h3>{inspectSub.studentName} — {inspectSub.examTitle}</h3>
+                <h3>{inspectSub.studentName} - {inspectSub.examTitle}</h3>
                 <div className="muted-text">
                   Điểm máy chấm: <strong>{inspectSub.score.toFixed(2)}/10</strong>
                   {inspectSub.adjustedScore !== null && ` · Điểm gia sư sửa: ${inspectSub.adjustedScore.toFixed(2)}/10`}

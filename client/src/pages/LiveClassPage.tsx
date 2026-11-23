@@ -838,7 +838,7 @@ export function LiveClassPage() {
         <section className="panel spotlight-box">
           <div className="spotlight-head">
             <div>
-              <strong>{spotlightExam.title}</strong> — Câu {room.questionIndex + 1}/{spotlightExam.questions.length}
+              <strong>{spotlightExam.title}</strong> - Câu {room.questionIndex + 1}/{spotlightExam.questions.length}
             </div>
             {isTeacher && (
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -1129,7 +1129,7 @@ export function LiveClassPage() {
                   <button
                     type="button"
                     className="icon-btn"
-                    title={room.studentCanDraw ? 'Đang cho HS cùng viết — bấm để khóa' : 'Đang khóa HS viết — bấm để mở'}
+                    title={room.studentCanDraw ? 'Đang cho HS cùng viết - bấm để khóa' : 'Đang khóa HS viết - bấm để mở'}
                     onClick={() =>
                       void apiSendLiveAction({ type: 'set-options', studentCanDraw: !room.studentCanDraw })
                     }

@@ -54,7 +54,7 @@ export function generateCustomMathExam(grade: GradeLevel, seed: number): Exam {
         textbook: 'chung',
         durationMinutes: 45,
         topics: cfg.blueprints[0].topics,
-        sourceNote: 'Sinh đề luyện tập ngẫu nhiên — Kèm lời giải chi tiết',
+        sourceNote: 'Sinh đề luyện tập ngẫu nhiên - Kèm lời giải chi tiết',
         mcqCount: 12,
         tfCount: 2,
         saCount: 4,

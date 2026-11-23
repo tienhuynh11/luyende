@@ -103,7 +103,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
       return sendJson(res, 503, { error: 'Máy chủ chưa kết nối cơ sở dữ liệu Postgres (DATABASE_URL).' });
     }
 
-    // Teacher/student scoped custom exams (guests get empty array — no leaking private exams)
+    // Teacher/student scoped custom exams (guests get empty array - no leaking private exams)
     if (path === '/api/exams' && req.method === 'GET') {
       const sess = await getCurrentUser(req);
       if (!sess) return sendJson(res, 200, { exams: [] });

@@ -115,7 +115,7 @@ export function HomePage() {
           <section className="notice-bar" style={{ borderLeftColor: 'var(--bad)' }}>
             <div>
               <strong>{liveNotif.title}</strong>
-              <span className="muted-inline"> — {liveNotif.detail}</span>
+              <span className="muted-inline"> - {liveNotif.detail}</span>
             </div>
             <button type="button" className="btn-primary btn-sm" onClick={() => navigate('/day-hoc')}>
               Vào phòng học ngay

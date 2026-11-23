@@ -293,7 +293,7 @@ export function ExamEditorPage() {
               {editingBuiltIn
                 ? hasOverride
                   ? 'Đề hệ thống (đã chỉnh sửa riêng)'
-                  : 'Đề hệ thống — lưu sẽ tạo bản chỉnh sửa riêng trên máy chủ'
+                  : 'Đề hệ thống - lưu sẽ tạo bản chỉnh sửa riêng trên máy chủ'
                 : 'Đề tự biên soạn'}
             </div>
           </div>
