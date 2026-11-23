@@ -527,6 +527,279 @@ h3 {
   background: color-mix(in srgb, var(--accent-soft) 45%, transparent);
 }
 
+/* TEACHER FEEDBACK ON STUDENT SUBMISSIONS */
+.inspect-q-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.teacher-q-note {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--warn);
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.teacher-q-note label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--warn);
+}
+
+.teacher-q-note input {
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg);
+}
+
+.teacher-feedback-banner {
+  background: var(--warn-soft);
+  border-left: 3px solid var(--warn);
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 14.5px;
+}
+
+/* LIVE TEACHING ROOM */
+.live-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.live-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.live-head h1 {
+  font-size: 20px;
+}
+
+.live-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.live-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 999px;
+}
+
+.live-status.on {
+  background: var(--good-soft);
+  color: var(--good);
+}
+
+.live-status.off {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.live-ctrl-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.meet-link-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.spotlight-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.spotlight-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 14.5px;
+}
+
+.spotlight-prompt {
+  font-size: 16px;
+}
+
+.spotlight-opts {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.spotlight-opt {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  font-size: 14.5px;
+}
+
+.spotlight-opt.correct {
+  border-color: var(--good);
+  background: var(--good-soft);
+}
+
+.live-grid {
+  display: grid;
+  grid-template-columns: 1fr 310px;
+  gap: 14px;
+  align-items: start;
+}
+
+.wb-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.wb-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.color-dot {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+
+.color-dot.active {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+}
+
+.wb-canvas-wrap {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.wb-canvas {
+  display: block;
+  width: 100%;
+  height: 460px;
+  touch-action: none;
+}
+
+.wb-canvas.drawable {
+  cursor: crosshair;
+}
+
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  height: 526px;
+}
+
+.chat-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 10px;
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 4px;
+}
+
+.chat-msg {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  font-size: 14px;
+}
+
+.chat-msg.is-teacher {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+}
+
+.chat-msg-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+
+.chat-msg-head small {
+  color: var(--muted);
+}
+
+.chat-form {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.chat-form input {
+  flex: 1;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+@media (max-width: 960px) {
+  .live-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wb-canvas {
+    height: 360px;
+  }
+
+  .chat-panel {
+    height: 340px;
+  }
+
+  .spotlight-opts {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* CATALOG HEAD & SUBJECTS */
 .catalog-head {
   display: flex;

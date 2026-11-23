@@ -1,4 +1,4 @@
-import { Download, Eye, Plus, Trash2, X } from 'lucide-react';
+import { Download, Eye, Plus, Save, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { gradeExam } from '@shared/scoring';
@@ -16,6 +16,7 @@ import {
   apiDeleteAssignment,
   apiDeleteStudent,
   apiMarkAllReviewed,
+  apiSaveSubmissionFeedback,
   fetchSubmissionDetail,
   fetchTeacherDashboard,
 } from '../lib/api';
@@ -66,9 +67,14 @@ export function TeacherPage() {
   const [filterStudentId, setFilterStudentId] = useState('all');
   const [filterExamId, setFilterExamId] = useState('all');
 
-  // Xem chi tiết bài làm
+  // Xem & chữa bài làm của học sinh
   const [inspectSub, setInspectSub] = useState<SubmissionRecord | null>(null);
   const [inspectLoading, setInspectLoading] = useState(false);
+  const [fbTeacherNote, setFbTeacherNote] = useState('');
+  const [fbAdjustedScore, setFbAdjustedScore] = useState('');
+  const [fbQuestionNotes, setFbQuestionNotes] = useState<Record<string, string>>({});
+  const [fbSaving, setFbSaving] = useState(false);
+  const [fbSavedMsg, setFbSavedMsg] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -201,9 +207,13 @@ export function TeacherPage() {
 
   const handleInspect = useCallback(async (subId: string) => {
     setInspectLoading(true);
+    setFbSavedMsg(null);
     try {
       const { submission } = await fetchSubmissionDetail(subId);
       setInspectSub(submission);
+      setFbTeacherNote(submission.teacherNote ?? '');
+      setFbAdjustedScore(submission.adjustedScore !== null ? String(submission.adjustedScore) : '');
+      setFbQuestionNotes(submission.questionNotes ?? {});
       setSubmissions((prev) =>
         prev.map((s) => (s.id === subId ? { ...s, reviewedAt: submission.reviewedAt ?? new Date().toISOString() } : s)),
       );
@@ -214,6 +224,27 @@ export function TeacherPage() {
       setInspectLoading(false);
     }
   }, [refreshNotifications]);
+
+  const handleSaveFeedback = async () => {
+    if (!inspectSub) return;
+    setFbSaving(true);
+    setFbSavedMsg(null);
+    try {
+      const adj = fbAdjustedScore.trim() === '' ? null : Number(fbAdjustedScore);
+      const { submission } = await apiSaveSubmissionFeedback(inspectSub.id, {
+        teacherNote: fbTeacherNote,
+        questionNotes: fbQuestionNotes,
+        adjustedScore: adj,
+      });
+      setInspectSub(submission);
+      setSubmissions((prev) => prev.map((s) => (s.id === submission.id ? { ...s, ...submission } : s)));
+      setFbSavedMsg('Đã lưu phần chữa bài! Học sinh sẽ nhận được thông báo ngay.');
+    } catch (err) {
+      alert((err as Error).message);
+    } finally {
+      setFbSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (inspectParamId && !authLoading && user?.role === 'teacher') {
@@ -361,9 +392,10 @@ export function TeacherPage() {
                   {filteredSubmissions.map((s) => (
                     <tr key={s.id} className={!s.reviewedAt ? 'row-unread' : ''}>
                       <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                           <strong>{s.studentName}</strong>
                           {!s.reviewedAt && <span className="tag">Mới</span>}
+                          {s.feedbackAt && <span className="book-badge">Đã chữa</span>}
                         </div>
                         <div className="cell-sub">{s.studentUsername}</div>
                       </td>
@@ -372,9 +404,14 @@ export function TeacherPage() {
                         <div className="cell-sub">Toán {s.grade} · {CATEGORY_LABELS[s.category]}</div>
                       </td>
                       <td>
-                        <span className={`score-badge ${s.score >= 8 ? 'good' : s.score >= 5 ? 'warn' : 'bad'}`}>
-                          {s.score.toFixed(2)}
-                        </span>
+                        {(() => {
+                          const finalScore = s.adjustedScore ?? s.score;
+                          return (
+                            <span className={`score-badge ${finalScore >= 8 ? 'good' : finalScore >= 5 ? 'warn' : 'bad'}`}>
+                              {finalScore.toFixed(2)}
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td>{s.correctCount}/{s.totalQuestions}</td>
                       <td>{formatDuration(s.durationSeconds)}</td>
@@ -386,7 +423,7 @@ export function TeacherPage() {
                           disabled={inspectLoading}
                           onClick={() => handleInspect(s.id)}
                         >
-                          <Eye size={14} /> Xem bài
+                          <Eye size={14} /> Xem & Sửa
                         </button>
                       </td>
                     </tr>
@@ -631,7 +668,7 @@ export function TeacherPage() {
         </div>
       )}
 
-      {/* MODAL XEM CHI TIẾT BÀI LÀM */}
+      {/* MODAL XEM & CHỮA BÀI LÀM CỦA HỌC SINH */}
       {inspectSub && (
         <div className="modal-backdrop" onClick={() => setInspectSub(null)}>
           <div className="inspect-modal" onClick={(e) => e.stopPropagation()}>
@@ -639,28 +676,75 @@ export function TeacherPage() {
               <div>
                 <h3>{inspectSub.studentName} — {inspectSub.examTitle}</h3>
                 <div className="muted-text">
-                  Điểm: <strong>{inspectSub.score.toFixed(2)}/10</strong> · Đúng {inspectSub.correctCount}/{inspectSub.totalQuestions} câu · Thời gian {formatDuration(inspectSub.durationSeconds)}
+                  Điểm máy chấm: <strong>{inspectSub.score.toFixed(2)}/10</strong>
+                  {inspectSub.adjustedScore !== null && ` · Điểm gia sư sửa: ${inspectSub.adjustedScore.toFixed(2)}/10`}
+                  {' · '}Đúng {inspectSub.correctCount}/{inspectSub.totalQuestions} câu · {formatDuration(inspectSub.durationSeconds)}
                 </div>
               </div>
-              <button type="button" className="icon-btn" onClick={() => setInspectSub(null)}>
-                <X size={18} />
-              </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" className="btn-primary btn-sm" disabled={fbSaving} onClick={handleSaveFeedback}>
+                  <Save size={15} /> {fbSaving ? 'Đang lưu...' : 'Lưu chữa bài'}
+                </button>
+                <button type="button" className="icon-btn" onClick={() => setInspectSub(null)}>
+                  <X size={18} />
+                </button>
+              </div>
             </div>
             <div className="inspect-body">
+              <div className="panel">
+                <div className="field-row" style={{ marginBottom: 10 }}>
+                  <div className="field">
+                    <label>Nhận xét chung của gia sư</label>
+                    <textarea
+                      className="editor-textarea"
+                      rows={2}
+                      placeholder="Ví dụ: Làm tốt phần đại số, cần xem lại cách biến đổi dấu ngoặc ở câu 4..."
+                      value={fbTeacherNote}
+                      onChange={(e) => setFbTeacherNote(e.target.value)}
+                    />
+                  </div>
+                  <div className="field">
+                    <label>Điểm sau khi gia sư chấm lại (để trống nếu giữ nguyên {inspectSub.score.toFixed(2)})</label>
+                    <input
+                      type="number"
+                      step="0.25"
+                      min={0}
+                      max={10}
+                      placeholder={inspectSub.score.toFixed(2)}
+                      value={fbAdjustedScore}
+                      onChange={(e) => setFbAdjustedScore(e.target.value)}
+                    />
+                  </div>
+                </div>
+                {fbSavedMsg && <div className="info-note">{fbSavedMsg}</div>}
+              </div>
+
               {inspectExam && inspectGraded && inspectSub.answers ? (
                 inspectExam.questions.map((q, idx) => (
-                  <QuestionCard
-                    key={q.id}
-                    question={q}
-                    index={idx}
-                    answer={inspectSub.answers![q.id]}
-                    result={inspectGraded.results[idx]}
-                    showSolution={true}
-                    isFlagged={false}
-                    isPracticeMode={false}
-                    onChangeAnswer={() => {}}
-                    onToggleFlag={() => {}}
-                  />
+                  <div key={q.id} className="inspect-q-wrap">
+                    <QuestionCard
+                      question={q}
+                      index={idx}
+                      answer={inspectSub.answers![q.id]}
+                      result={inspectGraded.results[idx]}
+                      showSolution={true}
+                      isFlagged={false}
+                      isPracticeMode={false}
+                      onChangeAnswer={() => {}}
+                      onToggleFlag={() => {}}
+                    />
+                    <div className="teacher-q-note">
+                      <label>Ghi chú chữa câu {idx + 1} cho học sinh (hỗ trợ $công thức$):</label>
+                      <input
+                        type="text"
+                        placeholder="Nhập lời sửa / nhắc nhở riêng cho câu này..."
+                        value={fbQuestionNotes[q.id] ?? ''}
+                        onChange={(e) =>
+                          setFbQuestionNotes((prev) => ({ ...prev, [q.id]: e.target.value }))
+                        }
+                      />
+                    </div>
+                  </div>
                 ))
               ) : (
                 <p className="muted-text">Không thể hiển thị chi tiết câu hỏi của đề ngẫu nhiên này.</p>

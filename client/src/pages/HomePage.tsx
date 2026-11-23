@@ -93,9 +93,137 @@ export function HomePage() {
     navigate(`/de/random/${grade}/${seed}?mode=exam`);
   };
 
+  const liveNotif = notifications.find((n) => n.kind === 'live-class');
+  const feedbackNotifs = notifications.filter((n) => n.kind === 'teacher-feedback');
+
+  // Khi hệ thống có DB và người dùng chưa đăng nhập -> mời đăng nhập gọn gàng
+  if (config.dbEnabled && !user) {
+    return (
+      <div className="container narrow-container" style={{ marginTop: 24 }}>
+        <div className="panel">
+          <h1 style={{ fontSize: 22, marginBottom: 8 }}>LuyệnĐề THCS</h1>
+          <p className="muted-text" style={{ marginBottom: 16 }}>
+            Hệ thống giao bài tập trắc nghiệm, chữa bài chi tiết và dạy học trực tiếp cho Toán cấp 2 (Lớp 6–9).
+            Vui lòng đăng nhập bằng tài khoản Gia sư hoặc Học sinh để bắt đầu.
+          </p>
+          <Link to="/dang-nhap" className="btn-primary full-width">
+            Đăng nhập / Đăng ký
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  // Giao diện riêng cho HỌC SINH: chỉ hiển thị bài được giao, nhận xét chữa bài và phòng học trực tiếp
+  if (user?.role === 'student') {
+    return (
+      <div className="container">
+        {liveNotif && (
+          <section className="notice-bar" style={{ borderLeftColor: 'var(--bad)' }}>
+            <div>
+              <strong>{liveNotif.title}</strong>
+              <span className="muted-inline"> — {liveNotif.detail}</span>
+            </div>
+            <button type="button" className="btn-primary btn-sm" onClick={() => navigate('/day-hoc')}>
+              Vào phòng học ngay
+            </button>
+          </section>
+        )}
+
+        {feedbackNotifs.length > 0 && (
+          <section className="panel student-board">
+            <div className="board-head">
+              <div>
+                <h2>Gia sư vừa chữa bài ({feedbackNotifs.length})</h2>
+                <div className="muted-text">Bấm để xem nhận xét và ghi chú sửa bài của gia sư.</div>
+              </div>
+            </div>
+            <div className="assignment-list">
+              {feedbackNotifs.map((fb) => (
+                <div key={fb.id} className="assignment-row">
+                  <div className="assignment-info">
+                    <strong>{fb.title}</strong>
+                    <div className="cell-sub">{fb.detail}</div>
+                  </div>
+                  <button type="button" className="btn-secondary btn-sm" onClick={() => navigate(fb.link)}>
+                    Xem chữa bài
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        <section className="panel student-board">
+          <div className="board-head">
+            <div>
+              <h1>Bài tập được giao</h1>
+              <div className="muted-text">
+                Học sinh: <strong>{user.fullName}</strong>
+                {user.grade ? ` · Lớp ${user.grade}` : ''} ·{' '}
+                {myAssignments.length > 0
+                  ? `${myAssignments.length} bài được giao`
+                  : 'Chưa có bài mới được giao'}
+              </div>
+            </div>
+            <Link to="/day-hoc" className="btn-secondary btn-sm">
+              Vào phòng học trực tiếp
+            </Link>
+          </div>
+
+          {myAssignments.length === 0 ? (
+            <div className="empty-inline">
+              Hiện gia sư chưa giao bài mới cho bạn. Khi có bài mới, hệ thống sẽ hiện ngay tại đây và báo ở chuông thông báo.
+            </div>
+          ) : (
+            <div className="assignment-list">
+              {myAssignments.map((a) => {
+                const isDone = a.myBestScore !== null && a.myBestScore !== undefined;
+                const isOverdue = !isDone && a.dueAt && new Date(a.dueAt).getTime() < Date.now();
+                return (
+                  <div key={a.id} className="assignment-row">
+                    <div className="assignment-info">
+                      <div className="assignment-meta">
+                        <span className="tag">Toán Lớp {a.grade}</span>
+                        {isOverdue && <span className="tag-urgent">Quá hạn</span>}
+                        {a.dueAt && (
+                          <span className="muted-inline">
+                            Hạn nộp: {new Date(a.dueAt).toLocaleString('vi-VN')}
+                          </span>
+                        )}
+                      </div>
+                      <strong>{a.examTitle}</strong>
+                      {a.note && <div className="cell-sub">{a.note}</div>}
+                    </div>
+                    <div className="assignment-right">
+                      {isDone ? (
+                        <span className={`score-badge ${a.myBestScore! >= 8 ? 'good' : a.myBestScore! >= 5 ? 'warn' : 'bad'}`}>
+                          Đã nộp: {a.myBestScore!.toFixed(2)}đ
+                        </span>
+                      ) : (
+                        <span className="tag-pending">Chưa làm</span>
+                      )}
+                      <button
+                        type="button"
+                        className="btn-primary btn-sm"
+                        onClick={() => navigate(`/de/${a.examId}?mode=exam&assignment=${a.id}`)}
+                      >
+                        {isDone ? 'Làm lại' : 'Làm bài'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="container">
-      {/* Khu vực tài khoản / Thông báo cần xử lý */}
+      {/* Khu vực gia sư / Thông báo cần xử lý */}
       {user?.role === 'teacher' && (
         <section className="panel student-board">
           <div className="board-head">
@@ -103,7 +231,7 @@ export function HomePage() {
               <h2>
                 {notifications.length > 0
                   ? `Cần xử lý (${notifications.length})`
-                  : `Giáo viên: ${user.fullName}`}
+                  : `Gia sư: ${user.fullName}`}
               </h2>
               <div className="muted-text">
                 {notifications.length > 0
@@ -111,9 +239,14 @@ export function HomePage() {
                   : 'Hiện chưa có bài nộp mới nào cần xem.'}
               </div>
             </div>
-            <Link to="/giao-vien" className="btn-primary btn-sm">
-              Giao bài & Xem điểm
-            </Link>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Link to="/day-hoc" className="btn-secondary btn-sm">
+                Mở phòng dạy trực tiếp
+              </Link>
+              <Link to="/giao-vien" className="btn-primary btn-sm">
+                Giao bài & Xem điểm
+              </Link>
+            </div>
           </div>
 
           {notifications.length > 0 && (
@@ -137,76 +270,12 @@ export function HomePage() {
                     className="btn-secondary btn-sm"
                     onClick={() => navigate(item.link)}
                   >
-                    Xem ngay
+                    Xem & Sửa bài
                   </button>
                 </div>
               ))}
             </div>
           )}
-        </section>
-      )}
-
-      {user?.role === 'student' && (
-        <section className="panel student-board">
-          <div className="board-head">
-            <div>
-              <h2>Bài được giao</h2>
-              <div className="muted-text">
-                {myAssignments.length > 0
-                  ? `Bạn có ${myAssignments.length} đề giáo viên giao.`
-                  : 'Hiện chưa có bài mới được giao. Bạn có thể tự luyện đề bên dưới.'}
-              </div>
-            </div>
-          </div>
-
-          {myAssignments.length > 0 && (
-            <div className="assignment-list">
-              {myAssignments.map((a) => (
-                <div key={a.id} className="assignment-row">
-                  <div className="assignment-info">
-                    <div className="assignment-meta">
-                      <span className="tag">Toán Lớp {a.grade}</span>
-                      {a.dueAt && (
-                        <span className="muted-inline">
-                          Hạn nộp: {new Date(a.dueAt).toLocaleString('vi-VN')}
-                        </span>
-                      )}
-                    </div>
-                    <strong>{a.examTitle}</strong>
-                    {a.note && <div className="cell-sub">{a.note}</div>}
-                  </div>
-                  <div className="assignment-right">
-                    {a.myBestScore !== null && a.myBestScore !== undefined ? (
-                      <span className={`score-badge ${a.myBestScore >= 8 ? 'good' : a.myBestScore >= 5 ? 'warn' : 'bad'}`}>
-                        Đã nộp: {a.myBestScore.toFixed(2)}đ
-                      </span>
-                    ) : (
-                      <span className="tag-pending">Chưa làm</span>
-                    )}
-                    <button
-                      type="button"
-                      className="btn-primary btn-sm"
-                      onClick={() => navigate(`/de/${a.examId}?mode=exam&assignment=${a.id}`)}
-                    >
-                      {a.myBestScore !== null && a.myBestScore !== undefined ? 'Làm lại' : 'Làm bài'}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-
-      {!user && config.dbEnabled && (
-        <section className="notice-bar">
-          <div>
-            <strong>Học sinh hoặc Giáo viên?</strong>
-            <span className="muted-inline"> Đăng nhập để nhận đề giáo viên giao và lưu điểm lên hệ thống.</span>
-          </div>
-          <Link to="/dang-nhap" className="btn-secondary btn-sm">
-            Đăng nhập / Đăng ký
-          </Link>
         </section>
       )}
 

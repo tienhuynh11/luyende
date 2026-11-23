@@ -101,11 +101,19 @@ export async function initDb(): Promise<boolean> {
       total_questions INT NOT NULL,
       duration_seconds INT NOT NULL,
       answers JSONB NOT NULL,
+      teacher_note TEXT NOT NULL DEFAULT '',
+      question_notes JSONB NOT NULL DEFAULT '{}'::jsonb,
+      adjusted_score NUMERIC(5, 2),
       submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      reviewed_at TIMESTAMPTZ
+      reviewed_at TIMESTAMPTZ,
+      feedback_at TIMESTAMPTZ
     )
   `);
   await pool.query(`ALTER TABLE luyende.submissions ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE luyende.submissions ADD COLUMN IF NOT EXISTS teacher_note TEXT NOT NULL DEFAULT ''`);
+  await pool.query(`ALTER TABLE luyende.submissions ADD COLUMN IF NOT EXISTS question_notes JSONB NOT NULL DEFAULT '{}'::jsonb`);
+  await pool.query(`ALTER TABLE luyende.submissions ADD COLUMN IF NOT EXISTS adjusted_score NUMERIC(5, 2)`);
+  await pool.query(`ALTER TABLE luyende.submissions ADD COLUMN IF NOT EXISTS feedback_at TIMESTAMPTZ`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_submissions_student ON luyende.submissions(student_id)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_submissions_assignment ON luyende.submissions(assignment_id)`);
 
@@ -368,7 +376,8 @@ export async function getStudentDashboard(studentId: string): Promise<{
   const subRes = await db.query(
     `SELECT s.id, s.student_id, a.full_name AS student_name, a.username AS student_username,
             s.assignment_id, s.exam_id, s.exam_title, s.grade, s.category, s.mode,
-            s.score, s.correct_count, s.total_questions, s.duration_seconds, s.submitted_at, s.reviewed_at
+            s.score, s.adjusted_score, s.correct_count, s.total_questions, s.duration_seconds,
+            s.teacher_note, s.submitted_at, s.reviewed_at, s.feedback_at
      FROM luyende.submissions s
      JOIN luyende.accounts a ON a.id = s.student_id
      WHERE s.student_id = $1
@@ -439,7 +448,8 @@ export async function getTeacherDashboard(teacherId: string): Promise<{
   const subRes = await db.query(
     `SELECT s.id, s.student_id, a.full_name AS student_name, a.username AS student_username,
             s.assignment_id, s.exam_id, s.exam_title, s.grade, s.category, s.mode,
-            s.score, s.correct_count, s.total_questions, s.duration_seconds, s.submitted_at, s.reviewed_at
+            s.score, s.adjusted_score, s.correct_count, s.total_questions, s.duration_seconds,
+            s.teacher_note, s.submitted_at, s.reviewed_at, s.feedback_at
      FROM luyende.submissions s
      JOIN luyende.accounts a ON a.id = s.student_id
      WHERE a.role = 'student'
@@ -452,14 +462,14 @@ export async function getTeacherDashboard(teacherId: string): Promise<{
 
 export async function getSubmissionForTeacher(submissionId: string): Promise<SubmissionRecord | null> {
   const db = requirePool();
-  // Tự động đánh dấu đã xem khi gia sư mở xem bài làm
   await db.query(`UPDATE luyende.submissions SET reviewed_at = COALESCE(reviewed_at, NOW()) WHERE id = $1`, [
     submissionId,
   ]);
   const res = await db.query(
     `SELECT s.id, s.student_id, a.full_name AS student_name, a.username AS student_username,
             s.assignment_id, s.exam_id, s.exam_title, s.grade, s.category, s.mode,
-            s.score, s.correct_count, s.total_questions, s.duration_seconds, s.answers, s.submitted_at, s.reviewed_at
+            s.score, s.adjusted_score, s.correct_count, s.total_questions, s.duration_seconds,
+            s.answers, s.teacher_note, s.question_notes, s.submitted_at, s.reviewed_at, s.feedback_at
      FROM luyende.submissions s
      JOIN luyende.accounts a ON a.id = s.student_id
      WHERE s.id = $1
@@ -471,7 +481,60 @@ export async function getSubmissionForTeacher(submissionId: string): Promise<Sub
   return {
     ...mapSubmissionRow(r),
     answers: r.answers as Record<string, UserAnswer>,
+    questionNotes: (r.question_notes ?? {}) as Record<string, string>,
   };
+}
+
+export async function getSubmissionForStudent(studentId: string, submissionId: string): Promise<SubmissionRecord | null> {
+  const db = requirePool();
+  const res = await db.query(
+    `SELECT s.id, s.student_id, a.full_name AS student_name, a.username AS student_username,
+            s.assignment_id, s.exam_id, s.exam_title, s.grade, s.category, s.mode,
+            s.score, s.adjusted_score, s.correct_count, s.total_questions, s.duration_seconds,
+            s.answers, s.teacher_note, s.question_notes, s.submitted_at, s.reviewed_at, s.feedback_at
+     FROM luyende.submissions s
+     JOIN luyende.accounts a ON a.id = s.student_id
+     WHERE s.id = $1 AND s.student_id = $2
+     LIMIT 1`,
+    [submissionId, studentId],
+  );
+  if (res.rows.length === 0) return null;
+  const r = res.rows[0];
+  return {
+    ...mapSubmissionRow(r),
+    answers: r.answers as Record<string, UserAnswer>,
+    questionNotes: (r.question_notes ?? {}) as Record<string, string>,
+  };
+}
+
+export async function saveSubmissionFeedback(
+  submissionId: string,
+  input: { teacherNote: string; questionNotes: Record<string, string>; adjustedScore: number | null },
+): Promise<SubmissionRecord | null> {
+  const db = requirePool();
+  const cleanNotes: Record<string, string> = {};
+  for (const [k, v] of Object.entries(input.questionNotes ?? {})) {
+    const trimmed = String(v ?? '').trim();
+    if (trimmed) cleanNotes[k] = trimmed.slice(0, 1000);
+  }
+  const adj =
+    input.adjustedScore !== null && Number.isFinite(input.adjustedScore)
+      ? Math.max(0, Math.min(10, Math.round(input.adjustedScore * 100) / 100))
+      : null;
+
+  const res = await db.query(
+    `UPDATE luyende.submissions
+     SET teacher_note = $2,
+         question_notes = $3::jsonb,
+         adjusted_score = $4,
+         reviewed_at = COALESCE(reviewed_at, NOW()),
+         feedback_at = NOW()
+     WHERE id = $1
+     RETURNING id`,
+    [submissionId, (input.teacherNote ?? '').trim().slice(0, 2000), JSON.stringify(cleanNotes), adj],
+  );
+  if (res.rows.length === 0) return null;
+  return getSubmissionForTeacher(submissionId);
 }
 
 export async function markAllSubmissionsReviewed(): Promise<void> {
@@ -567,6 +630,29 @@ export async function getNotificationsForUser(user: AccountPublic): Promise<Noti
         link: `/de/${r.exam_id}?mode=exam&assignment=${r.id}`,
         urgent: isOverdue || isDueSoon,
         timestamp: (r.due_at ?? r.created_at).toISOString(),
+      });
+    }
+
+    // Học sinh: bài làm vừa được gia sư chữa trong 7 ngày gần đây
+    const fbRes = await db.query(
+      `SELECT id, exam_title, teacher_note, adjusted_score, score, feedback_at
+       FROM luyende.submissions
+       WHERE student_id = $1 AND feedback_at IS NOT NULL AND feedback_at > NOW() - INTERVAL '7 days'
+       ORDER BY feedback_at DESC
+       LIMIT 5`,
+      [user.id],
+    );
+    for (const r of fbRes.rows) {
+      const finalScore = r.adjusted_score !== null ? Number(r.adjusted_score) : Number(r.score);
+      items.push({
+        id: `fb-${r.id}`,
+        kind: 'teacher-feedback',
+        title: `Gia sư đã chữa bài: ${r.exam_title} (${finalScore.toFixed(2)}đ)`,
+        detail: r.teacher_note || 'Bấm để xem ghi chú chữa bài chi tiết của gia sư',
+        link: `/lich-su?xem=${r.id}`,
+        urgent: false,
+        timestamp: r.feedback_at.toISOString(),
+        submissionId: r.id,
       });
     }
   }
@@ -713,10 +799,13 @@ function mapSubmissionRow(r: any): SubmissionRecord {
     category: r.category as ExamCategory,
     mode: r.mode === 'practice' ? 'practice' : 'exam',
     score: Number(r.score),
+    adjustedScore: r.adjusted_score !== null && r.adjusted_score !== undefined ? Number(r.adjusted_score) : null,
     correctCount: Number(r.correct_count),
     totalQuestions: Number(r.total_questions),
     durationSeconds: Number(r.duration_seconds),
+    teacherNote: r.teacher_note ?? '',
     submittedAt: r.submitted_at.toISOString(),
     reviewedAt: r.reviewed_at ? r.reviewed_at.toISOString() : null,
+    feedbackAt: r.feedback_at ? r.feedback_at.toISOString() : null,
   };
 }

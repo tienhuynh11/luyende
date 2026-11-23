@@ -4,11 +4,13 @@ import type {
   Exam,
   ExamCategory,
   GradeLevel,
+  LiveRoomState,
   NotificationItem,
   StudentSummary,
   SubmissionRecord,
   UserAnswer,
   UserRole,
+  WhiteboardStroke,
 } from '@shared/types';
 
 export interface StoredExamDto {
@@ -159,10 +161,44 @@ export function apiDeleteOrHideExam(examId: string, mode: 'delete' | 'hide'): Pr
   });
 }
 
-export function fetchNotifications(): Promise<{ count: number; items: NotificationItem[] }> {
+export function fetchNotifications(): Promise<{ count: number; items: NotificationItem[]; liveActive?: boolean }> {
   return request('/api/notifications');
 }
 
 export function apiMarkAllReviewed(): Promise<{ ok: boolean }> {
   return request('/api/teacher/submissions/review-all', { method: 'POST' });
+}
+
+export function apiSaveSubmissionFeedback(
+  submissionId: string,
+  payload: { teacherNote: string; questionNotes: Record<string, string>; adjustedScore: number | null },
+): Promise<{ submission: SubmissionRecord }> {
+  return request(`/api/teacher/submissions/${encodeURIComponent(submissionId)}/feedback`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchStudentSubmissionDetail(submissionId: string): Promise<{ submission: SubmissionRecord }> {
+  return request(`/api/student/submissions/${encodeURIComponent(submissionId)}`);
+}
+
+export function fetchLiveState(): Promise<{ state: LiveRoomState }> {
+  return request('/api/live/state');
+}
+
+export type LiveActionClientPayload =
+  | { type: 'set-active'; active: boolean }
+  | { type: 'set-spotlight'; examId: string | null; questionIndex?: number; showSolution?: boolean }
+  | { type: 'set-options'; studentCanDraw?: boolean; gridPaper?: boolean; meetUrl?: string }
+  | { type: 'add-stroke'; stroke: WhiteboardStroke }
+  | { type: 'undo-stroke' }
+  | { type: 'clear-board' }
+  | { type: 'chat'; text: string };
+
+export function apiSendLiveAction(action: LiveActionClientPayload): Promise<{ ok: boolean }> {
+  return request('/api/live/action', {
+    method: 'POST',
+    body: JSON.stringify(action),
+  });
 }

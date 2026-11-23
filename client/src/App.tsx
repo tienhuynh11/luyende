@@ -8,6 +8,7 @@ import { ExamEditorPage } from './pages/ExamEditorPage';
 import { ExamPage } from './pages/ExamPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { HomePage } from './pages/HomePage';
+import { LiveClassPage } from './pages/LiveClassPage';
 import { LoginPage } from './pages/LoginPage';
 import { TeacherPage } from './pages/TeacherPage';
 
@@ -31,6 +32,7 @@ export function App() {
               <Route path="/giao-vien" element={<TeacherPage />} />
               <Route path="/giao-vien/tao-de" element={<ExamEditorPage />} />
               <Route path="/giao-vien/sua-de/:examId" element={<ExamEditorPage />} />
+              <Route path="/day-hoc" element={<LiveClassPage />} />
               <Route path="/de/:examId" element={<ExamPage />} />
               <Route path="/de/random/:grade/:seed" element={<ExamPage />} />
               <Route path="/lich-su" element={<HistoryPage />} />

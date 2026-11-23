@@ -1,9 +1,13 @@
-import { Trash2 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Eye, Trash2, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { gradeExam } from '@shared/scoring';
 import { CATEGORY_LABELS, type GradeLevel, type SubmissionRecord } from '@shared/types';
-import { fetchStudentDashboard } from '../lib/api';
+import { MathText } from '../components/MathText';
+import { QuestionCard } from '../components/QuestionCard';
+import { fetchStudentDashboard, fetchStudentSubmissionDetail } from '../lib/api';
 import { useAuth } from '../lib/authContext';
+import { useExams } from '../lib/examStore';
 import { clearProgress, loadProgress } from '../lib/storage';
 
 function formatDuration(sec: number): string {
@@ -14,11 +18,16 @@ function formatDuration(sec: number): string {
 
 export function HistoryPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
+  const { getExam } = useExams();
+
+  const viewParam = searchParams.get('xem') ?? '';
 
   const [localProgress, setLocalProgress] = useState(() => loadProgress());
   const [serverSubs, setServerSubs] = useState<SubmissionRecord[] | null>(null);
   const [gradeFilter, setGradeFilter] = useState<'all' | GradeLevel>('all');
+  const [viewSub, setViewSub] = useState<SubmissionRecord | null>(null);
 
   useEffect(() => {
     if (!user) {
@@ -30,6 +39,21 @@ export function HistoryPage() {
       .catch(() => setServerSubs(null));
   }, [user]);
 
+  const openSubmission = useCallback(async (id: string) => {
+    try {
+      const { submission } = await fetchStudentSubmissionDetail(id);
+      setViewSub(submission);
+    } catch (err) {
+      alert((err as Error).message);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (viewParam && user) {
+      void openSubmission(viewParam);
+    }
+  }, [viewParam, user, openSubmission]);
+
   const rows = useMemo(() => {
     const list = serverSubs
       ? serverSubs.map((s) => ({
@@ -38,13 +62,19 @@ export function HistoryPage() {
           examTitle: s.examTitle,
           grade: s.grade,
           category: s.category,
-          score: s.score,
+          score: s.adjustedScore ?? s.score,
           correctCount: s.correctCount,
           totalQuestions: s.totalQuestions,
           durationSeconds: s.durationSeconds,
           submittedAt: new Date(s.submittedAt).getTime(),
+          hasFeedback: Boolean(s.feedbackAt),
+          fromServer: true,
         }))
-      : localProgress.attempts;
+      : localProgress.attempts.map((a) => ({
+          ...a,
+          hasFeedback: false,
+          fromServer: false,
+        }));
 
     return gradeFilter === 'all' ? list : list.filter((a) => a.grade === gradeFilter);
   }, [serverSubs, localProgress, gradeFilter]);
@@ -56,6 +86,9 @@ export function HistoryPage() {
     return { count: rows.length, avg: sum / rows.length, best };
   }, [rows]);
 
+  const viewExam = viewSub ? getExam(viewSub.examId) : undefined;
+  const viewGraded = viewSub && viewExam && viewSub.answers ? gradeExam(viewExam, viewSub.answers) : null;
+
   return (
     <div className="container">
       <div className="page-head">
@@ -63,8 +96,8 @@ export function HistoryPage() {
           <h1>Lịch sử làm bài</h1>
           <p className="muted-text">
             {user
-              ? `Đang hiển thị lịch sử của tài khoản ${user.fullName} (đồng bộ từ cơ sở dữ liệu).`
-              : 'Lịch sử lưu trên trình duyệt này. Đăng nhập để lưu đồng bộ nhiều thiết bị.'}
+              ? `Tài khoản ${user.fullName} — xem lại điểm số và phần gia sư chữa bài.`
+              : 'Lịch sử lưu trên trình duyệt này.'}
           </p>
         </div>
         {!user && localProgress.attempts.length > 0 && (
@@ -122,7 +155,7 @@ export function HistoryPage() {
         <div className="panel empty-inline">
           <p>Chưa có bài làm nào.</p>
           <button type="button" className="btn-primary btn-sm" onClick={() => navigate('/')}>
-            Về kho đề
+            Về trang chính
           </button>
         </div>
       ) : (
@@ -143,7 +176,10 @@ export function HistoryPage() {
               {rows.map((att) => (
                 <tr key={att.id}>
                   <td>
-                    <strong>{att.examTitle}</strong>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <strong>{att.examTitle}</strong>
+                      {att.hasFeedback && <span className="tag">Gia sư đã chữa</span>}
+                    </div>
                     <div className="cell-sub">{CATEGORY_LABELS[att.category]}</div>
                   </td>
                   <td>Lớp {att.grade}</td>
@@ -156,20 +192,86 @@ export function HistoryPage() {
                   <td>{formatDuration(att.durationSeconds)}</td>
                   <td className="cell-nowrap">{new Date(att.submittedAt).toLocaleString('vi-VN')}</td>
                   <td>
-                    {!att.examId.includes('-random-') && (
-                      <button
-                        type="button"
-                        className="btn-secondary btn-sm"
-                        onClick={() => navigate(`/de/${att.examId}?mode=exam`)}
-                      >
-                        Làm lại
-                      </button>
-                    )}
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {att.fromServer && (
+                        <button
+                          type="button"
+                          className="btn-secondary btn-sm"
+                          onClick={() => void openSubmission(att.id)}
+                        >
+                          <Eye size={14} /> {att.hasFeedback ? 'Xem chữa bài' : 'Xem lại'}
+                        </button>
+                      )}
+                      {!att.examId.includes('-random-') && (
+                        <button
+                          type="button"
+                          className="btn-secondary btn-sm"
+                          onClick={() => navigate(`/de/${att.examId}?mode=exam`)}
+                        >
+                          Làm lại
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* MODAL XEM BÀI ĐÃ NỘP & LỜI PHÊ CỦA GIA SƯ */}
+      {viewSub && (
+        <div className="modal-backdrop" onClick={() => setViewSub(null)}>
+          <div className="inspect-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="inspect-head">
+              <div>
+                <h3>{viewSub.examTitle}</h3>
+                <div className="muted-text">
+                  Điểm: <strong>{(viewSub.adjustedScore ?? viewSub.score).toFixed(2)}/10</strong> · Đúng {viewSub.correctCount}/{viewSub.totalQuestions} câu
+                </div>
+              </div>
+              <button type="button" className="icon-btn" onClick={() => setViewSub(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="inspect-body">
+              {viewSub.teacherNote && (
+                <div className="teacher-feedback-banner">
+                  <strong>Nhận xét của gia sư:</strong>
+                  <div><MathText text={viewSub.teacherNote} /></div>
+                </div>
+              )}
+
+              {viewExam && viewGraded && viewSub.answers ? (
+                viewExam.questions.map((q, idx) => {
+                  const qNote = viewSub.questionNotes?.[q.id];
+                  return (
+                    <div key={q.id} className="inspect-q-wrap">
+                      <QuestionCard
+                        question={q}
+                        index={idx}
+                        answer={viewSub.answers![q.id]}
+                        result={viewGraded.results[idx]}
+                        showSolution={true}
+                        isFlagged={false}
+                        isPracticeMode={false}
+                        onChangeAnswer={() => {}}
+                        onToggleFlag={() => {}}
+                      />
+                      {qNote && (
+                        <div className="teacher-feedback-banner">
+                          <strong>Gia sư chữa câu {idx + 1}:</strong> <MathText text={qNote} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="muted-text">Không tìm thấy chi tiết câu hỏi.</p>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

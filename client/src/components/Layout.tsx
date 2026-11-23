@@ -1,4 +1,4 @@
-import { Bell, BookOpen, ClipboardList, History, LogIn, LogOut, Moon, Sun } from 'lucide-react';
+import { Bell, BookOpen, ClipboardList, History, LogIn, LogOut, Moon, Radio, Sun } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { apiMarkAllReviewed } from '../lib/api';
@@ -21,6 +21,7 @@ export function Layout({ theme, onToggleTheme, children }: LayoutProps) {
   const isHome = location.pathname === '/';
   const isHistory = location.pathname === '/lich-su';
   const isTeacher = location.pathname.startsWith('/giao-vien');
+  const isLive = location.pathname === '/day-hoc';
   const isLogin = location.pathname === '/dang-nhap';
 
   useEffect(() => {
@@ -66,12 +67,17 @@ export function Layout({ theme, onToggleTheme, children }: LayoutProps) {
 
           <nav className="topnav">
             <Link to="/" className={`nav-link desktop-only ${isHome ? 'active' : ''}`}>
-              Kho đề
+              {user?.role === 'student' ? 'Bài được giao' : 'Kho đề'}
             </Link>
             {user?.role === 'teacher' && (
               <Link to="/giao-vien" className={`nav-link desktop-only ${isTeacher ? 'active' : ''}`}>
                 Giao bài & Điểm
                 {notifications.length > 0 && <span className="nav-count">{notifications.length}</span>}
+              </Link>
+            )}
+            {user && (
+              <Link to="/day-hoc" className={`nav-link desktop-only ${isLive ? 'active' : ''}`}>
+                {user.role === 'teacher' ? 'Dạy trực tiếp' : 'Phòng học'}
               </Link>
             )}
             <Link to="/lich-su" className={`nav-link desktop-only ${isHistory ? 'active' : ''}`}>
@@ -177,7 +183,7 @@ export function Layout({ theme, onToggleTheme, children }: LayoutProps) {
       <nav className="mobile-bottom-nav" aria-label="Điều hướng điện thoại">
         <Link to="/" className={`mb-item ${isHome ? 'active' : ''}`}>
           <BookOpen size={20} />
-          <span>Kho đề</span>
+          <span>{user?.role === 'student' ? 'Bài tập' : 'Kho đề'}</span>
         </Link>
 
         {user?.role === 'teacher' && (
@@ -187,6 +193,13 @@ export function Layout({ theme, onToggleTheme, children }: LayoutProps) {
               {notifications.length > 0 && <i className="mb-dot">{notifications.length}</i>}
             </span>
             <span>Giao bài</span>
+          </Link>
+        )}
+
+        {user && (
+          <Link to="/day-hoc" className={`mb-item ${isLive ? 'active' : ''}`}>
+            <Radio size={20} />
+            <span>{user.role === 'teacher' ? 'Dạy live' : 'Phòng học'}</span>
           </Link>
         )}
 

@@ -26,14 +26,23 @@ import {
   getAccountBySessionToken,
   getNotificationsForUser,
   getStudentDashboard,
+  getSubmissionForStudent,
   getSubmissionForTeacher,
   getTeacherDashboard,
   isDbEnabled,
   listStoredExams,
   markAllSubmissionsReviewed,
   saveSubmission,
+  saveSubmissionFeedback,
   upsertStoredExam,
 } from './db.js';
+import {
+  applyLiveAction,
+  getLiveRoomState,
+  isLiveRoomActive,
+  registerLiveClient,
+  type LiveActionPayload,
+} from './liveRoom.js';
 
 function sendJson(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
@@ -207,7 +216,44 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
     // Notifications for logged-in user (student or teacher)
     if (path === '/api/notifications' && req.method === 'GET') {
       const items = await getNotificationsForUser(user);
-      return sendJson(res, 200, { count: items.length, items });
+      const live = isLiveRoomActive();
+      if (live.active && user.role === 'student') {
+        items.unshift({
+          id: 'live-room-active',
+          kind: 'live-class',
+          title: `${live.hostName || 'Gia sư'} đang mở phòng dạy trực tiếp`,
+          detail: 'Bấm để vào bảng trắng & học trực tiếp ngay',
+          link: '/day-hoc',
+          urgent: true,
+          timestamp: live.startedAt ?? new Date().toISOString(),
+        });
+      }
+      return sendJson(res, 200, { count: items.length, items, liveActive: live.active });
+    }
+
+    // Live teaching room (SSE + actions)
+    if (path === '/api/live/stream' && req.method === 'GET') {
+      registerLiveClient(user, res);
+      return;
+    }
+
+    if (path === '/api/live/state' && req.method === 'GET') {
+      return sendJson(res, 200, { state: getLiveRoomState() });
+    }
+
+    if (path === '/api/live/action' && req.method === 'POST') {
+      const action = await readJson<LiveActionPayload>(req);
+      const result = applyLiveAction(user, action);
+      if (!result.ok) return sendJson(res, 403, { error: result.error });
+      return sendJson(res, 200, { ok: true });
+    }
+
+    // Student views their own submission & teacher's feedback
+    if (path.startsWith('/api/student/submissions/') && req.method === 'GET') {
+      const subId = decodeURIComponent(path.slice('/api/student/submissions/'.length));
+      const submission = await getSubmissionForStudent(user.id, subId);
+      if (!submission) return sendJson(res, 404, { error: 'Không tìm thấy bài làm.' });
+      return sendJson(res, 200, { submission });
     }
 
     // Student dashboard
@@ -337,6 +383,27 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
       if (path === '/api/teacher/submissions/review-all' && req.method === 'POST') {
         await markAllSubmissionsReviewed();
         return sendJson(res, 200, { ok: true });
+      }
+
+      if (path.startsWith('/api/teacher/submissions/') && path.endsWith('/feedback') && req.method === 'POST') {
+        const subId = decodeURIComponent(
+          path.slice('/api/teacher/submissions/'.length, -'/feedback'.length),
+        );
+        const body = await readJson<{
+          teacherNote?: string;
+          questionNotes?: Record<string, string>;
+          adjustedScore?: number | null;
+        }>(req);
+        const updated = await saveSubmissionFeedback(subId, {
+          teacherNote: body.teacherNote ?? '',
+          questionNotes: body.questionNotes ?? {},
+          adjustedScore:
+            body.adjustedScore === null || body.adjustedScore === undefined || String(body.adjustedScore) === ''
+              ? null
+              : Number(body.adjustedScore),
+        });
+        if (!updated) return sendJson(res, 404, { error: 'Không tìm thấy bài làm.' });
+        return sendJson(res, 200, { submission: updated });
       }
 
       if (path.startsWith('/api/teacher/submissions/') && req.method === 'GET') {

@@ -58,23 +58,65 @@ export interface SubmissionRecord {
   category: ExamCategory;
   mode: 'exam' | 'practice';
   score: number;
+  adjustedScore: number | null;
   correctCount: number;
   totalQuestions: number;
   durationSeconds: number;
   answers?: Record<string, UserAnswer>;
+  teacherNote: string;
+  questionNotes?: Record<string, string>;
   submittedAt: string;
   reviewedAt: string | null;
+  feedbackAt: string | null;
 }
 
 export interface NotificationItem {
   id: string;
-  kind: 'new-submission' | 'pending-assignment' | 'overdue-assignment';
+  kind: 'new-submission' | 'pending-assignment' | 'overdue-assignment' | 'teacher-feedback' | 'live-class';
   title: string;
   detail: string;
   link: string;
   urgent: boolean;
   timestamp: string;
   submissionId?: string;
+}
+
+export interface WhiteboardPoint {
+  x: number; // normalized 0..1
+  y: number; // normalized 0..1
+}
+
+export interface WhiteboardStroke {
+  id: string;
+  authorName: string;
+  color: string;
+  width: number;
+  eraser?: boolean;
+  points: WhiteboardPoint[];
+}
+
+export interface LiveChatMessage {
+  id: string;
+  authorId: string;
+  authorName: string;
+  role: UserRole;
+  text: string;
+  createdAt: string;
+}
+
+export interface LiveRoomState {
+  active: boolean;
+  hostName: string;
+  startedAt: string | null;
+  examId: string | null;
+  questionIndex: number;
+  showSolution: boolean;
+  studentCanDraw: boolean;
+  gridPaper: boolean;
+  meetUrl: string;
+  strokes: WhiteboardStroke[];
+  messages: LiveChatMessage[];
+  participants: Array<{ id: string; name: string; role: UserRole }>;
 }
 
 export interface SubjectMeta {
