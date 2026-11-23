@@ -1,10 +1,8 @@
 import {
   ArrowLeft,
-  CheckCircle2,
   Clock,
   LayoutGrid,
   RotateCcw,
-  Send,
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -18,6 +16,8 @@ import {
 } from '@shared/types';
 import { QuestionCard } from '../components/QuestionCard';
 import { generateCustomMathExam, getExamById } from '../content';
+import { apiSaveSubmission } from '../lib/api';
+import { useAuth } from '../lib/authContext';
 import { clearDraft, loadDraft, recordAttempt, saveDraft } from '../lib/storage';
 
 function formatTime(sec: number): string {
@@ -32,14 +32,17 @@ function getRatingLabel(score: number): { text: string; cls: string } {
   if (score >= 8) return { text: 'Giỏi', cls: 'good' };
   if (score >= 6.5) return { text: 'Khá', cls: 'warn' };
   if (score >= 5) return { text: 'Đạt', cls: 'warn' };
-  return { text: 'Cần cố gắng thêm', cls: 'bad' };
+  return { text: 'Chưa đạt', cls: 'bad' };
 }
 
 export function ExamPage() {
   const navigate = useNavigate();
   const params = useParams<{ examId?: string; grade?: string; seed?: string }>();
   const [searchParams] = useSearchParams();
+  const { user } = useAuth();
+
   const modeParam = searchParams.get('mode') === 'practice' ? 'practice' : 'exam';
+  const assignmentId = searchParams.get('assignment');
 
   const exam = useMemo(() => {
     if (params.examId) return getExamById(params.examId);
@@ -53,7 +56,7 @@ export function ExamPage() {
 
   const initialDraft = useMemo(() => (exam ? loadDraft(exam.id) : null), [exam]);
 
-  const [mode, setMode] = useState<'exam' | 'practice'>(initialDraft?.mode ?? modeParam);
+  const [mode, setMode] = useState<'exam' | 'practice'>(assignmentId ? 'exam' : (initialDraft?.mode ?? modeParam));
   const [answers, setAnswers] = useState<Record<string, UserAnswer>>(initialDraft?.answers ?? {});
   const [flagged, setFlagged] = useState<string[]>(initialDraft?.flagged ?? []);
   const [checkedPracticeIds, setCheckedPracticeIds] = useState<Record<string, boolean>>({});
@@ -62,11 +65,11 @@ export function ExamPage() {
     initialDraft?.remainingSeconds ?? (exam ? exam.durationMinutes * 60 : 900),
   );
   const [submitted, setSubmitted] = useState(false);
+  const [syncSaved, setSyncSaved] = useState<'idle' | 'saved' | 'error'>('idle');
   const [reviewFilter, setReviewFilter] = useState<'all' | 'wrong'>('all');
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
 
-  // Countdown timer in exam mode
   useEffect(() => {
     if (!exam || submitted || mode !== 'exam') return;
     const timer = window.setInterval(() => {
@@ -81,7 +84,6 @@ export function ExamPage() {
     return () => window.clearInterval(timer);
   }, [exam, submitted, mode]);
 
-  // Auto-submit when timer hits 0
   useEffect(() => {
     if (exam && !submitted && mode === 'exam' && remainingSeconds === 0) {
       handleSubmit();
@@ -89,7 +91,6 @@ export function ExamPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [remainingSeconds]);
 
-  // Auto-save draft
   useEffect(() => {
     if (!exam || submitted) return;
     saveDraft({
@@ -115,7 +116,7 @@ export function ExamPage() {
   if (!exam || !graded) {
     return (
       <div className="container">
-        <div className="empty-state">
+        <div className="panel empty-inline">
           <p>Không tìm thấy đề kiểm tra này.</p>
           <button type="button" className="btn-primary" onClick={() => navigate('/')}>
             Quay lại kho đề
@@ -157,6 +158,25 @@ export function ExamPage() {
       totalQuestions: exam.questions.length,
       answers,
     });
+
+    if (user) {
+      apiSaveSubmission({
+        assignmentId,
+        examId: exam.id,
+        examTitle: exam.title,
+        grade: exam.grade,
+        category: exam.category,
+        mode,
+        score: graded.score,
+        correctCount: graded.correctCount,
+        totalQuestions: exam.questions.length,
+        durationSeconds: elapsed,
+        answers,
+      })
+        .then(() => setSyncSaved('saved'))
+        .catch(() => setSyncSaved('error'));
+    }
+
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -168,6 +188,7 @@ export function ExamPage() {
     setStartedAt(Date.now());
     setRemainingSeconds(exam.durationMinutes * 60);
     setSubmitted(false);
+    setSyncSaved('idle');
     setReviewFilter('all');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -175,9 +196,7 @@ export function ExamPage() {
   const scrollToQuestion = (qId: string) => {
     setMobileSheetOpen(false);
     const el = document.getElementById(`q-${qId}`);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   const answeredCount = graded.answeredCount;
@@ -187,11 +206,9 @@ export function ExamPage() {
     .map((q, i) => ({ q, i }))
     .filter(({ q }) => {
       if (!submitted || reviewFilter === 'all') return true;
-      const res = resultMap.get(q.id);
-      return !res?.isFullyCorrect;
+      return !resultMap.get(q.id)?.isFullyCorrect;
     });
 
-  // Part breakdown after submission
   const partStats = [
     { key: 'mcq', label: 'Phần I · Trắc nghiệm 4 lựa chọn' },
     { key: 'true-false', label: 'Phần II · Đúng / Sai' },
@@ -231,10 +248,9 @@ export function ExamPage() {
 
   return (
     <div className="container exam-page">
-      {/* Thanh tiêu đề đề thi */}
       <div className="exam-header-bar">
         <button type="button" className="back-btn" onClick={() => navigate('/')}>
-          <ArrowLeft size={17} /> Kho đề
+          <ArrowLeft size={16} /> Kho đề
         </button>
 
         <div className="exam-header-info">
@@ -242,12 +258,13 @@ export function ExamPage() {
             <span className={`cat-badge cat-${exam.category}`}>{CATEGORY_LABELS[exam.category]}</span>
             <span className="book-badge">Toán Lớp {exam.grade}</span>
             <span className="book-badge hide-xs">{TEXTBOOK_LABELS[exam.textbook]}</span>
+            {assignmentId && <span className="tag">Bài giáo viên giao</span>}
           </div>
           <h1>{exam.title}</h1>
           {exam.sourceNote && <div className="exam-source">{exam.sourceNote}</div>}
         </div>
 
-        {!submitted && (
+        {!submitted && !assignmentId && (
           <div className="mode-switch">
             <button
               type="button"
@@ -261,7 +278,7 @@ export function ExamPage() {
               className={`seg-btn ${mode === 'practice' ? 'active' : ''}`}
               onClick={() => setMode('practice')}
             >
-              Luyện tập
+              Luyện từng câu
             </button>
           </div>
         )}
@@ -287,11 +304,10 @@ export function ExamPage() {
         )}
       </div>
 
-      {/* Kết quả sau khi nộp bài */}
       {submitted && (
         <section className="result-banner">
           <div className="result-score-col">
-            <div className="result-score-ring">
+            <div className="result-score-box">
               <strong>{graded.score.toFixed(2)}</strong>
               <span>/ 10 điểm</span>
             </div>
@@ -299,10 +315,11 @@ export function ExamPage() {
           </div>
 
           <div className="result-details">
-            <h2>Hoàn thành bài kiểm tra!</h2>
+            <h2>Kết quả bài làm</h2>
             <p>
-              Bạn làm đúng trọn vẹn <strong>{graded.correctCount}/{exam.questions.length}</strong> câu. Dưới đây là{' '}
-              <strong>đáp án và lời giải chi tiết</strong> cho từng câu hỏi để bạn đối chiếu và rút kinh nghiệm.
+              Đúng trọn vẹn <strong>{graded.correctCount}/{exam.questions.length}</strong> câu.
+              {syncSaved === 'saved' && ' Kết quả đã được lưu lên hệ thống cho giáo viên theo dõi.'}
+              {syncSaved === 'error' && ' (Chưa gửi được kết quả lên máy chủ, đã lưu tạm trên máy.)'}
             </p>
             <div className="part-breakdown">
               {partStats.map(
@@ -318,23 +335,22 @@ export function ExamPage() {
               )}
             </div>
             <div className="result-actions">
-              <button type="button" className="btn-primary" onClick={handleRetry}>
-                <RotateCcw size={16} /> Làm lại đề này
+              <button type="button" className="btn-primary btn-sm" onClick={handleRetry}>
+                <RotateCcw size={15} /> Làm lại đề này
               </button>
-              <button type="button" className="btn-secondary" onClick={() => navigate('/')}>
-                Chọn đề khác
+              <button type="button" className="btn-secondary btn-sm" onClick={() => navigate('/')}>
+                Về kho đề
               </button>
             </div>
           </div>
         </section>
       )}
 
-      {/* Layout 2 cột trên PC, 1 cột trên Mobile */}
       <div className="exam-layout">
         <div className="exam-questions-col">
           {submitted && (
             <div className="review-filter-bar">
-              <span>Xem lời giải chi tiết:</span>
+              <span>Đáp án & Lời giải chi tiết</span>
               <div className="cat-pills">
                 <button
                   type="button"
@@ -355,9 +371,7 @@ export function ExamPage() {
           )}
 
           {visibleQuestions.length === 0 ? (
-            <div className="empty-state">
-              <CheckCircle2 size={28} /> Tuyệt vời! Bạn đã làm đúng tất cả các câu hỏi trong đề này.
-            </div>
+            <div className="panel empty-inline">Bạn đã làm đúng tất cả các câu hỏi trong đề này.</div>
           ) : (
             visibleQuestions.map(({ q, i }) => (
               <QuestionCard
@@ -380,39 +394,36 @@ export function ExamPage() {
           {!submitted && (
             <div className="bottom-submit-box">
               <p>
-                Đã trả lời <strong>{answeredCount}/{exam.questions.length}</strong> câu hỏi.
+                Đã trả lời <strong>{answeredCount}/{exam.questions.length}</strong> câu.
               </p>
               <button type="button" className="btn-primary" onClick={() => setShowConfirmModal(true)}>
-                <Send size={16} /> Nộp bài & Xem lời giải chi tiết
+                Nộp bài & Xem lời giải
               </button>
             </div>
           )}
         </div>
 
-        {/* Sidebar phiếu trả lời trên PC */}
         <aside className="exam-sidebar">
           <div className="sidebar-card">
             {!submitted ? (
               <div className={`sidebar-timer ${remainingSeconds < 300 && mode === 'exam' ? 'urgent' : ''}`}>
-                <Clock size={18} />
+                <Clock size={17} />
                 <div>
-                  <small>{mode === 'exam' ? 'Thời gian còn lại' : 'Chế độ Luyện tập'}</small>
+                  <small>{mode === 'exam' ? 'Thời gian còn lại' : 'Chế độ luyện từng câu'}</small>
                   <strong>{mode === 'exam' ? formatTime(remainingSeconds) : 'Không giới hạn'}</strong>
                 </div>
               </div>
             ) : (
               <div className="sidebar-score">
-                <small>Điểm số của bạn</small>
+                <small>Điểm số</small>
                 <strong>{graded.score.toFixed(2)} / 10</strong>
               </div>
             )}
 
             <div className="sidebar-progress">
               <div className="sidebar-progress-top">
-                <span>Tiến độ làm bài</span>
-                <strong>
-                  {answeredCount}/{exam.questions.length}
-                </strong>
+                <span>Đã làm</span>
+                <strong>{answeredCount}/{exam.questions.length}</strong>
               </div>
               <div className="progress-track">
                 <div
@@ -422,7 +433,7 @@ export function ExamPage() {
               </div>
             </div>
 
-            <div className="sidebar-section-title">Bảng câu hỏi</div>
+            <div className="sidebar-section-title">Phiếu câu hỏi</div>
             {navGrid}
 
             <div className="nav-legend">
@@ -435,34 +446,29 @@ export function ExamPage() {
               ) : (
                 <>
                   <span><i className="dot good" /> Đúng</span>
-                  <span><i className="dot bad" /> Chưa đúng</span>
+                  <span><i className="dot bad" /> Sai</span>
                 </>
               )}
             </div>
 
             {!submitted ? (
-              <button
-                type="button"
-                className="btn-primary full-width"
-                onClick={() => setShowConfirmModal(true)}
-              >
-                <Send size={16} /> Nộp bài & Xem lời giải
+              <button type="button" className="btn-primary full-width" onClick={() => setShowConfirmModal(true)}>
+                Nộp bài
               </button>
             ) : (
               <button type="button" className="btn-primary full-width" onClick={handleRetry}>
-                <RotateCcw size={16} /> Làm lại đề này
+                <RotateCcw size={15} /> Làm lại đề này
               </button>
             )}
           </div>
         </aside>
       </div>
 
-      {/* Mobile Question Navigator Drawer */}
       {mobileSheetOpen && (
         <div className="modal-backdrop" onClick={() => setMobileSheetOpen(false)}>
           <div className="mobile-sheet" onClick={(e) => e.stopPropagation()}>
             <div className="sheet-header">
-              <strong>Phiếu trả lời ({answeredCount}/{exam.questions.length})</strong>
+              <strong>Phiếu câu hỏi ({answeredCount}/{exam.questions.length})</strong>
               <button type="button" className="icon-btn" onClick={() => setMobileSheetOpen(false)}>
                 <X size={18} />
               </button>
@@ -472,24 +478,22 @@ export function ExamPage() {
         </div>
       )}
 
-      {/* Confirm Submit Modal */}
       {showConfirmModal && (
         <div className="modal-backdrop" onClick={() => setShowConfirmModal(false)}>
           <div className="confirm-modal" onClick={(e) => e.stopPropagation()}>
             <h3>Xác nhận nộp bài?</h3>
             <p>
-              Bạn đã hoàn thành <strong>{answeredCount}/{exam.questions.length}</strong> câu hỏi.
+              Bạn đã làm <strong>{answeredCount}/{exam.questions.length}</strong> câu.
               {answeredCount < exam.questions.length
-                ? ` Vẫn còn ${exam.questions.length - answeredCount} câu chưa trả lời.`
-                : ' Tất cả các câu hỏi đã được trả lời.'}
+                ? ` Còn ${exam.questions.length - answeredCount} câu chưa chọn đáp án.`
+                : ''}
             </p>
-            <p className="muted-text">Sau khi nộp bài, hệ thống sẽ chấm điểm tự động và hiển thị lời giải chi tiết từng câu.</p>
             <div className="modal-actions">
               <button type="button" className="btn-secondary" onClick={() => setShowConfirmModal(false)}>
                 Kiểm tra lại
               </button>
               <button type="button" className="btn-primary" onClick={handleSubmit}>
-                Nộp bài ngay
+                Nộp bài
               </button>
             </div>
           </div>

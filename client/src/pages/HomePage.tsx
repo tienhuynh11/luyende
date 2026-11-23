@@ -1,24 +1,19 @@
-import {
-  Award,
-  BookMarked,
-  Clock,
-  FileText,
-  Play,
-  Search,
-  Shuffle,
-  Sparkles,
-} from 'lucide-react';
-import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Clock, Search } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   CATEGORY_LABELS,
   TEXTBOOK_LABELS,
+  type AssignmentInfo,
+  type ClassroomInfo,
   type ExamCategory,
   type GradeLevel,
   type SubjectId,
   type TextbookSeries,
 } from '@shared/types';
 import { SUBJECTS, getExams } from '../content';
+import { apiJoinClass, fetchStudentDashboard } from '../lib/api';
+import { useAuth } from '../lib/authContext';
 import { loadDraft, loadProgress } from '../lib/storage';
 
 const GRADES: GradeLevel[] = [6, 7, 8, 9];
@@ -32,14 +27,53 @@ const CATEGORIES: Array<{ id: 'all' | ExamCategory; label: string }> = [
 
 export function HomePage() {
   const navigate = useNavigate();
+  const { user, config } = useAuth();
+
   const [subjectId, setSubjectId] = useState<SubjectId>('toan');
   const [grade, setGrade] = useState<GradeLevel>(() => {
+    if (user?.grade) return user.grade;
     const saved = Number(localStorage.getItem('luyende_grade'));
     return saved === 6 || saved === 7 || saved === 8 || saved === 9 ? saved : 6;
   });
   const [category, setCategory] = useState<'all' | ExamCategory>('all');
   const [textbook, setTextbook] = useState<'all' | TextbookSeries>('all');
   const [query, setQuery] = useState('');
+
+  // Student classroom & assignments
+  const [myClasses, setMyClasses] = useState<ClassroomInfo[]>([]);
+  const [myAssignments, setMyAssignments] = useState<AssignmentInfo[]>([]);
+  const [joinCode, setJoinCode] = useState('');
+  const [joinMsg, setJoinMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
+  const loadStudentData = useCallback(async () => {
+    if (!user || user.role !== 'student') return;
+    try {
+      const data = await fetchStudentDashboard();
+      setMyClasses(data.classes);
+      setMyAssignments(data.assignments);
+    } catch {
+      // ignore
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (user?.grade) setGrade(user.grade);
+    void loadStudentData();
+  }, [user, loadStudentData]);
+
+  const handleJoinClass = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!joinCode.trim()) return;
+    setJoinMsg(null);
+    try {
+      const { classroom } = await apiJoinClass(joinCode.trim());
+      setJoinCode('');
+      setJoinMsg({ type: 'ok', text: `Đã tham gia lớp ${classroom.name} (${classroom.teacherName ?? 'Giáo viên'}).` });
+      void loadStudentData();
+    } catch (err) {
+      setJoinMsg({ type: 'err', text: (err as Error).message });
+    }
+  };
 
   const progress = useMemo(() => loadProgress(), []);
 
@@ -77,81 +111,133 @@ export function HomePage() {
     navigate(`/de/random/${grade}/${seed}?mode=exam`);
   };
 
-  const completedInGrade = exams.filter((e) => bestScoreByExam.has(e.id)).length;
-
   return (
     <div className="container">
-      {/* Hero Banner */}
-      <section className="hero">
-        <div className="hero-content">
-          <div className="hero-badge">
-            <Sparkles size={14} /> Học kì 1 · Năm học 2026–2027 · Chuẩn GDPT 2018
+      {/* Khu vực tài khoản / Bài giáo viên giao */}
+      {user?.role === 'teacher' && (
+        <section className="notice-bar">
+          <div>
+            <strong>Chế độ giáo viên ({user.fullName})</strong>
+            <span className="muted-inline"> — Tạo lớp, lấy mã lớp gửi học sinh, giao đề và xem bảng điểm.</span>
           </div>
-          <h1>Luyện đề kiểm tra trắc nghiệm THCS</h1>
-          <p className="hero-desc">
-            Tổng hợp <strong>96 bộ đề Toán lớp 6, 7, 8, 9</strong> bám sát 3 bộ sách{' '}
-            <em>Kết nối tri thức, Chân trời sáng tạo, Cánh diều</em>. Tự động chấm điểm theo thang 10 và hiển thị{' '}
-            <strong>lời giải chi tiết</strong> từng câu ngay sau khi nộp bài.
+          <Link to="/giao-vien" className="btn-primary btn-sm">
+            Vào trang Quản lý lớp
+          </Link>
+        </section>
+      )}
+
+      {user?.role === 'student' && (
+        <section className="panel student-board">
+          <div className="board-head">
+            <div>
+              <h2>Bài giáo viên giao</h2>
+              <div className="muted-text">
+                {myClasses.length > 0
+                  ? `Đang tham gia: ${myClasses.map((c) => `Lớp ${c.name}`).join(', ')}`
+                  : 'Chưa tham gia lớp nào — nhập mã lớp do giáo viên gửi để nhận đề.'}
+              </div>
+            </div>
+            <form onSubmit={handleJoinClass} className="join-inline">
+              <input
+                type="text"
+                placeholder="Nhập mã lớp (vd: T8-AB12)"
+                value={joinCode}
+                onChange={(e) => setJoinCode(e.target.value)}
+              />
+              <button type="submit" className="btn-secondary btn-sm">
+                Tham gia lớp
+              </button>
+            </form>
+          </div>
+
+          {joinMsg && (
+            <div className={joinMsg.type === 'ok' ? 'info-note' : 'form-error'} style={{ marginTop: 10 }}>
+              {joinMsg.text}
+            </div>
+          )}
+
+          {myAssignments.length > 0 && (
+            <div className="assignment-list">
+              {myAssignments.map((a) => (
+                <div key={a.id} className="assignment-row">
+                  <div className="assignment-info">
+                    <div className="assignment-meta">
+                      <span className="tag">Lớp {a.className}</span>
+                      {a.dueAt && (
+                        <span className="muted-inline">
+                          Hạn nộp: {new Date(a.dueAt).toLocaleString('vi-VN')}
+                        </span>
+                      )}
+                    </div>
+                    <strong>{a.examTitle}</strong>
+                    {a.note && <div className="cell-sub">{a.note}</div>}
+                  </div>
+                  <div className="assignment-right">
+                    {a.myBestScore !== null && a.myBestScore !== undefined ? (
+                      <span className={`score-badge ${a.myBestScore >= 8 ? 'good' : a.myBestScore >= 5 ? 'warn' : 'bad'}`}>
+                        Đã nộp: {a.myBestScore.toFixed(2)}đ
+                      </span>
+                    ) : (
+                      <span className="tag-pending">Chưa làm</span>
+                    )}
+                    <button
+                      type="button"
+                      className="btn-primary btn-sm"
+                      onClick={() => navigate(`/de/${a.examId}?mode=exam&assignment=${a.id}`)}
+                    >
+                      {a.myBestScore !== null && a.myBestScore !== undefined ? 'Làm lại' : 'Làm bài'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {!user && config.dbEnabled && (
+        <section className="notice-bar">
+          <div>
+            <strong>Học sinh hoặc Giáo viên?</strong>
+            <span className="muted-inline"> Đăng nhập để nhận đề giáo viên giao và lưu điểm lên hệ thống.</span>
+          </div>
+          <Link to="/dang-nhap" className="btn-secondary btn-sm">
+            Đăng nhập / Đăng ký
+          </Link>
+        </section>
+      )}
+
+      {/* Tiêu đề kho đề đơn giản, rõ ràng */}
+      <div className="catalog-head">
+        <div>
+          <h1>Kho đề kiểm tra trắc nghiệm THCS</h1>
+          <p className="muted-text">
+            Học kì 1 · Năm học 2026–2027 · Bám sát Kết nối tri thức, Chân trời sáng tạo, Cánh diều.
           </p>
-          <div className="hero-actions">
-            <button type="button" className="btn-primary" onClick={handleRandomExam}>
-              <Shuffle size={17} /> Tạo đề ngẫu nhiên Toán {grade}
-            </button>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => {
-                setCategory('cuoi-hk1');
-                document.getElementById('exam-list')?.scrollIntoView({ behavior: 'smooth' });
-              }}
-            >
-              <FileText size={17} /> Xem đề Cuối HK1
-            </button>
-          </div>
         </div>
-        <div className="hero-stats">
-          <div className="stat-box">
-            <span className="stat-val">24</span>
-            <span className="stat-lbl">Đề / mỗi khối</span>
-          </div>
-          <div className="stat-box">
-            <span className="stat-val">100%</span>
-            <span className="stat-lbl">Trắc nghiệm</span>
-          </div>
-          <div className="stat-box">
-            <span className="stat-val">Chi tiết</span>
-            <span className="stat-lbl">Lời giải từng câu</span>
-          </div>
-        </div>
-      </section>
+        <button type="button" className="btn-secondary btn-sm" onClick={handleRandomExam}>
+          Tạo đề ngẫu nhiên Toán {grade}
+        </button>
+      </div>
 
-      {/* Chọn môn học (mở rộng đa môn) */}
+      {/* Chọn môn */}
+      <div className="subject-bar">
+        {SUBJECTS.map((subj) => (
+          <button
+            key={subj.id}
+            type="button"
+            disabled={!subj.available}
+            className={`subject-tab ${subjectId === subj.id ? 'active' : ''}`}
+            onClick={() => subj.available && setSubjectId(subj.id)}
+          >
+            {subj.name}
+            {!subj.available && <small> (sắp có)</small>}
+          </button>
+        ))}
+      </div>
+
+      {/* Chọn khối lớp + bộ lọc */}
       <section className="section-block">
-        <div className="section-label">Môn học</div>
-        <div className="subject-strip">
-          {SUBJECTS.map((subj) => (
-            <button
-              key={subj.id}
-              type="button"
-              disabled={!subj.available}
-              className={`subject-chip ${subjectId === subj.id ? 'active' : ''} ${!subj.available ? 'disabled' : ''}`}
-              onClick={() => subj.available && setSubjectId(subj.id)}
-              title={subj.description}
-            >
-              <span className="subject-icon" style={{ background: subj.color }}>
-                {subj.icon}
-              </span>
-              <span className="subject-info">
-                <strong>{subj.name}</strong>
-                <small>{subj.available ? '96 đề · Lớp 6–9' : 'Sắp bổ sung'}</small>
-              </span>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      {/* Chọn khối lớp */}
-      <section className="section-block" id="exam-list">
         <div className="grade-bar">
           <div className="grade-tabs" role="tablist">
             {GRADES.map((g) => (
@@ -163,26 +249,7 @@ export function HomePage() {
                 className={`grade-tab ${grade === g ? 'active' : ''}`}
                 onClick={() => handleSelectGrade(g)}
               >
-                Toán Lớp {g}
-              </button>
-            ))}
-          </div>
-          <div className="grade-progress">
-            Đã hoàn thành <strong>{completedInGrade}</strong>/{exams.length} đề lớp {grade}
-          </div>
-        </div>
-
-        {/* Bộ lọc kỳ thi, bộ sách, tìm kiếm */}
-        <div className="filter-bar">
-          <div className="cat-pills">
-            {CATEGORIES.map((cat) => (
-              <button
-                key={cat.id}
-                type="button"
-                className={`pill-btn ${category === cat.id ? 'active' : ''}`}
-                onClick={() => setCategory(cat.id)}
-              >
-                {cat.label}
+                Lớp {g}
               </button>
             ))}
           </div>
@@ -192,7 +259,7 @@ export function HomePage() {
               className="select-input"
               value={textbook}
               onChange={(e) => setTextbook(e.target.value as 'all' | TextbookSeries)}
-              aria-label="Lọc theo bộ sách giáo khoa"
+              aria-label="Lọc theo bộ sách"
             >
               <option value="all">Tất cả bộ sách</option>
               <option value="kntt">Kết nối tri thức</option>
@@ -201,11 +268,11 @@ export function HomePage() {
             </select>
 
             <div className="search-wrap">
-              <Search size={16} className="search-icon" />
+              <Search size={15} className="search-icon" />
               <input
                 type="search"
                 className="search-input"
-                placeholder="Tìm chuyên đề, tên đề..."
+                placeholder="Tìm chuyên đề..."
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
@@ -213,11 +280,21 @@ export function HomePage() {
           </div>
         </div>
 
-        {/* Danh sách đề kiểm tra */}
+        <div className="cat-pills" style={{ marginBottom: 16 }}>
+          {CATEGORIES.map((cat) => (
+            <button
+              key={cat.id}
+              type="button"
+              className={`pill-btn ${category === cat.id ? 'active' : ''}`}
+              onClick={() => setCategory(cat.id)}
+            >
+              {cat.label}
+            </button>
+          ))}
+        </div>
+
         {filteredExams.length === 0 ? (
-          <div className="empty-state">
-            Không tìm thấy đề kiểm tra phù hợp với bộ lọc hiện tại. Hãy thử chọn "Tất cả" hoặc xóa từ khóa tìm kiếm.
-          </div>
+          <div className="panel empty-inline">Không có đề phù hợp với bộ lọc hiện tại.</div>
         ) : (
           <div className="exam-grid">
             {filteredExams.map((exam) => {
@@ -235,16 +312,10 @@ export function HomePage() {
 
                   <div className="exam-meta-row">
                     <span>
-                      <Clock size={14} /> {exam.durationMinutes} phút
+                      <Clock size={13} /> {exam.durationMinutes} phút
                     </span>
-                    <span>
-                      <FileText size={14} /> {exam.questions.length} câu
-                    </span>
-                    {best !== undefined && (
-                      <span className="best-score">
-                        <Award size={14} /> Cao nhất: {best.toFixed(2)}đ
-                      </span>
-                    )}
+                    <span>{exam.questions.length} câu</span>
+                    {best !== undefined && <span className="best-score">Cao nhất: {best.toFixed(2)}đ</span>}
                   </div>
 
                   {draft && (
@@ -259,15 +330,25 @@ export function HomePage() {
                       className="btn-primary btn-sm"
                       onClick={() => navigate(`/de/${exam.id}?mode=exam`)}
                     >
-                      <Play size={15} /> {draft ? 'Làm tiếp' : 'Thi thử'}
+                      {draft ? 'Làm tiếp' : 'Làm bài'}
                     </button>
-                    <button
-                      type="button"
-                      className="btn-secondary btn-sm"
-                      onClick={() => navigate(`/de/${exam.id}?mode=practice`)}
-                    >
-                      <BookMarked size={15} /> Luyện tập
-                    </button>
+                    {user?.role === 'teacher' ? (
+                      <button
+                        type="button"
+                        className="btn-secondary btn-sm"
+                        onClick={() => navigate(`/giao-vien?assign=${exam.id}`)}
+                      >
+                        Giao lớp
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn-secondary btn-sm"
+                        onClick={() => navigate(`/de/${exam.id}?mode=practice`)}
+                      >
+                        Luyện từng câu
+                      </button>
+                    )}
                   </div>
                 </article>
               );

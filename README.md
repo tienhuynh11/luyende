@@ -1,44 +1,28 @@
 # LuyệnĐề THCS
 
-Web luyện đề kiểm tra trắc nghiệm cấp 2 (Lớp 6, 7, 8, 9) theo **Chương trình GDPT 2018** (bám sát 3 bộ sách *Kết nối tri thức, Chân trời sáng tạo, Cánh diều*), thiết kế tương thích hoàn hảo trên cả **PC và điện thoại**.
+Web luyện đề kiểm tra trắc nghiệm cấp 2 (Lớp 6, 7, 8, 9) theo **Chương trình GDPT 2018**, có hệ thống tài khoản **Giáo viên** (tạo lớp, giao đề, xem bài làm & xuất điểm Excel) và **Học sinh** (tham gia lớp bằng mã, làm bài, xem điểm & lời giải chi tiết).
 
-## Tính năng chính
+## Bảo mật đăng nhập
 
-- **96 đề kiểm tra trắc nghiệm Toán THCS** (24 đề cho mỗi khối Lớp 6, 7, 8, 9), tập trung vào thời điểm **Học kì 1**:
-  - 8 Đề kiểm tra Cuối Học kì 1 (90 phút — cấu trúc mới: Trắc nghiệm 4 lựa chọn + Đúng/Sai + Trả lời ngắn)
-  - 6 Đề kiểm tra Giữa Học kì 1 (60 phút)
-  - 6 Đề kiểm tra 15 phút theo chuyên đề
-  - 4 Đề Ôn tập chương (45 phút)
-- **Sinh đề luyện tập ngẫu nhiên** bất cứ lúc nào cho từng khối lớp.
-- **Chấm điểm tự động theo thang điểm 10** (chuẩn cách tính điểm Đúng/Sai mới của Bộ GD&ĐT) kèm **lời giải chi tiết** hiển thị công thức Toán đẹp mắt bằng KaTeX.
-- **Hai chế độ làm bài**: *Thi thử* (có đồng hồ đếm ngược, tự lưu nháp) và *Luyện tập* (kiểm tra & xem lời giải ngay từng câu).
-- **Sẵn sàng mở rộng đa môn**: Kiến trúc tách biệt từng môn (`client/src/content/subjects.ts` và `client/src/content/index.ts`) để dễ dàng bổ sung Ngữ văn, Tiếng Anh, Khoa học tự nhiên, Lịch sử & Địa lí sau này.
+- Mật khẩu băm bằng **`scrypt` + salt ngẫu nhiên riêng từng tài khoản**, so sánh bằng `timingSafeEqual`.
+- Phiên đăng nhập dùng token ngẫu nhiên 256-bit, chỉ lưu bản băm **SHA-256** trong Postgres (`luyende.sessions`), gửi qua cookie **`HttpOnly; SameSite=Lax; Secure`**.
+- Giới hạn tần suất thử đăng nhập / đăng ký (rate limiting) chống dò mật khẩu.
+- Phân quyền rõ ràng giữa `teacher` và `student`; toàn bộ truy vấn SQL dùng parameterized queries.
+- **Bảo vệ tài khoản giáo viên**: tài khoản giáo viên đầu tiên có thể đăng ký ngay khi triển khai. Từ giáo viên thứ 2 trở đi bắt buộc phải có biến môi trường `TEACHER_INVITE_CODE` để học sinh không thể tự đăng ký làm giáo viên.
 
-## Cấu trúc thư mục
+## Luồng sử dụng cho Giáo viên & Học sinh
 
-```
-client/   Vite + React + KaTeX (giao diện PC/Mobile, kho đề, lời giải chi tiết)
-server/   Node HTTP server (phục vụ client/dist, /health, API đồng bộ lịch sử tùy chọn)
-shared/   Kiểu dữ liệu & logic chấm điểm dùng chung giữa client và server
-Dockerfile & render.yaml   Deploy 1-click lên Render giống dự án speakup
-```
-
-## Chạy local
-
-```bash
-cd server && npm install && npm run dev   # API tại :8787
-cd client && npm install && npm run dev   # Giao diện tại :5173
-```
+1. **Giáo viên**: Vào `/dang-nhap` → tab **Đăng ký tài khoản** → chọn vai trò **Giáo viên** để tạo tài khoản đầu tiên.
+2. Vào mục **Quản lý lớp** (`/giao-vien`):
+   - Tạo lớp (vd `8A1`, Khối 8) → hệ thống cấp **Mã lớp** (vd `T8-AB12`).
+   - Chọn **Giao đề** cho lớp (từ 96 đề Toán 6–9) kèm hạn nộp & dặn dò.
+   - Xem kết quả nộp bài của học sinh, bấm **Xem bài** để kiểm tra từng câu, hoặc bấm **Xuất Excel (CSV)**.
+3. **Học sinh**: Đăng ký tài khoản **Học sinh** và nhập **Mã lớp** giáo viên gửi → đề giáo viên giao hiện ngay trên trang chủ. Nộp bài xong học sinh thấy điểm + lời giải chi tiết, còn giáo viên thấy ngay kết quả trong bảng điểm.
 
 ## Deploy lên Render
 
-1. Đẩy thư mục `luyende` lên GitHub.
-2. Vào Render Dashboard → **New → Blueprint** → chọn repo. Render tự đọc `render.yaml` và build `Dockerfile`.
-3. **Không bắt buộc cấu hình biến môi trường nào** — web chạy ngay lập tức với lưu trữ cục bộ (`localStorage`).
-4. *(Tùy chọn)* Nếu muốn đồng bộ lịch sử làm bài giữa PC và điện thoại, điền `DATABASE_URL` (có thể dùng chung Neon Postgres với `speakup`; bảng của `luyende` nằm riêng trong schema `luyende`).
-
-## Thêm môn học mới sau này
-
-1. Tạo thư mục `client/src/content/<ma-mon>/` chứa các file đề theo khối lớp 6–9.
-2. Đổi `available: true` cho môn đó trong `client/src/content/subjects.ts`.
-3. Gắn danh sách đề vào `EXAMS_BY_SUBJECT` trong `client/src/content/index.ts`.
+1. Đẩy code lên GitHub.
+2. Render tự đọc `render.yaml` và build `Dockerfile`.
+3. Điền biến môi trường:
+   - `DATABASE_URL`: chuỗi kết nối Postgres (Neon). Toàn bộ bảng nằm riêng trong schema `luyende`.
+   - `TEACHER_INVITE_CODE` *(tùy chọn)*: mã bí mật nếu sau này muốn tạo thêm tài khoản giáo viên khác.

@@ -10,6 +10,10 @@ const PORT = Number(process.env.PORT ?? 8787);
 initDb().catch((e) => console.error('[db] không kết nối được Postgres:', (e as Error).message));
 
 const server = createServer((req, res) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+
   const path = (req.url ?? '/').split('?')[0];
   if (path === '/health') {
     res.writeHead(200, { 'content-type': 'application/json' });

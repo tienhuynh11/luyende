@@ -1,15 +1,10 @@
-import { Award, Cloud, Play, Trash2 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CATEGORY_LABELS, type GradeLevel } from '@shared/types';
-import {
-  checkServerSyncEnabled,
-  clearProgress,
-  getSyncCode,
-  loadProgress,
-  registerCloudSync,
-  restoreFromCloudCode,
-} from '../lib/storage';
+import { CATEGORY_LABELS, type GradeLevel, type SubmissionRecord } from '@shared/types';
+import { fetchStudentDashboard } from '../lib/api';
+import { useAuth } from '../lib/authContext';
+import { clearProgress, loadProgress } from '../lib/storage';
 
 function formatDuration(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -19,70 +14,67 @@ function formatDuration(sec: number): string {
 
 export function HistoryPage() {
   const navigate = useNavigate();
-  const [progress, setProgress] = useState(() => loadProgress());
+  const { user } = useAuth();
+
+  const [localProgress, setLocalProgress] = useState(() => loadProgress());
+  const [serverSubs, setServerSubs] = useState<SubmissionRecord[] | null>(null);
   const [gradeFilter, setGradeFilter] = useState<'all' | GradeLevel>('all');
-  const [syncEnabled, setSyncEnabled] = useState(false);
-  const [syncCode, setSyncCodeState] = useState<string | null>(() => getSyncCode());
-  const [restoreInput, setRestoreInput] = useState('');
-  const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    void checkServerSyncEnabled().then(setSyncEnabled);
-  }, []);
+    if (!user) {
+      setServerSubs(null);
+      return;
+    }
+    fetchStudentDashboard()
+      .then((d) => setServerSubs(d.submissions))
+      .catch(() => setServerSubs(null));
+  }, [user]);
 
-  const filtered = useMemo(() => {
-    if (gradeFilter === 'all') return progress.attempts;
-    return progress.attempts.filter((a) => a.grade === gradeFilter);
-  }, [progress, gradeFilter]);
+  const rows = useMemo(() => {
+    const list = serverSubs
+      ? serverSubs.map((s) => ({
+          id: s.id,
+          examId: s.examId,
+          examTitle: s.examTitle,
+          grade: s.grade,
+          category: s.category,
+          score: s.score,
+          correctCount: s.correctCount,
+          totalQuestions: s.totalQuestions,
+          durationSeconds: s.durationSeconds,
+          submittedAt: new Date(s.submittedAt).getTime(),
+        }))
+      : localProgress.attempts;
+
+    return gradeFilter === 'all' ? list : list.filter((a) => a.grade === gradeFilter);
+  }, [serverSubs, localProgress, gradeFilter]);
 
   const stats = useMemo(() => {
-    const arr = progress.attempts;
-    if (arr.length === 0) return { count: 0, avg: 0, best: 0 };
-    const sum = arr.reduce((acc, a) => acc + a.score, 0);
-    const best = Math.max(...arr.map((a) => a.score));
-    return { count: arr.length, avg: sum / arr.length, best };
-  }, [progress]);
-
-  const handleCreateCode = async () => {
-    setSyncMsg('Đang tạo mã đồng bộ...');
-    const res = await registerCloudSync();
-    if (res.code) {
-      setSyncCodeState(res.code);
-      setSyncMsg(`Đã bật đồng bộ! Lưu mã ${res.code} để dùng trên máy khác.`);
-    } else {
-      setSyncMsg(res.error ?? 'Lỗi đồng bộ.');
-    }
-  };
-
-  const handleRestore = async () => {
-    if (!restoreInput.trim()) return;
-    setSyncMsg('Đang đồng bộ dữ liệu...');
-    const res = await restoreFromCloudCode(restoreInput);
-    if (res.progress) {
-      setProgress(res.progress);
-      setSyncCodeState(restoreInput.trim().toUpperCase());
-      setRestoreInput('');
-      setSyncMsg('Đồng bộ thành công!');
-    } else {
-      setSyncMsg(res.error ?? 'Không tìm thấy mã.');
-    }
-  };
+    if (rows.length === 0) return { count: 0, avg: 0, best: 0 };
+    const sum = rows.reduce((acc, a) => acc + a.score, 0);
+    const best = Math.max(...rows.map((a) => a.score));
+    return { count: rows.length, avg: sum / rows.length, best };
+  }, [rows]);
 
   return (
     <div className="container">
       <div className="page-head">
         <div>
-          <h1>Lịch sử làm bài & Thống kê</h1>
-          <p className="muted-text">Theo dõi tiến bộ qua từng đề kiểm tra Toán THCS.</p>
+          <h1>Lịch sử làm bài</h1>
+          <p className="muted-text">
+            {user
+              ? `Đang hiển thị lịch sử của tài khoản ${user.fullName} (đồng bộ từ cơ sở dữ liệu).`
+              : 'Lịch sử lưu trên trình duyệt này. Đăng nhập để lưu đồng bộ nhiều thiết bị.'}
+          </p>
         </div>
-        {progress.attempts.length > 0 && (
+        {!user && localProgress.attempts.length > 0 && (
           <button
             type="button"
             className="btn-secondary btn-sm"
             onClick={() => {
-              if (window.confirm('Xóa toàn bộ lịch sử làm bài trên máy này?')) {
+              if (window.confirm('Xóa lịch sử làm bài trên trình duyệt này?')) {
                 clearProgress();
-                setProgress(loadProgress());
+                setLocalProgress(loadProgress());
               }
             }}
           >
@@ -93,7 +85,7 @@ export function HistoryPage() {
 
       <div className="stats-row">
         <div className="stat-card">
-          <small>Tổng số lượt làm bài</small>
+          <small>Số bài đã nộp</small>
           <strong>{stats.count}</strong>
         </div>
         <div className="stat-card">
@@ -102,108 +94,82 @@ export function HistoryPage() {
         </div>
         <div className="stat-card">
           <small>Điểm cao nhất</small>
-          <strong>{stats.count ? `${stats.best.toFixed(2)}đ` : '—'}</strong>
+          <strong>{stats.count ? `${stats.best.toFixed(2)}` : '—'}</strong>
         </div>
       </div>
 
-      {syncEnabled && (
-        <section className="sync-card">
-          <div className="sync-head">
-            <Cloud size={18} />
-            <strong>Đồng bộ giữa PC và Điện thoại</strong>
-          </div>
-          {syncCode ? (
-            <p>
-              Mã khôi phục của bạn: <code className="sync-code">{syncCode}</code> — nhập mã này trên thiết bị khác để
-              đồng bộ lịch sử làm bài.
-            </p>
-          ) : (
-            <div className="sync-controls">
-              <button type="button" className="btn-primary btn-sm" onClick={handleCreateCode}>
-                Tạo mã đồng bộ mới
-              </button>
-              <div className="sync-restore">
-                <input
-                  type="text"
-                  className="sa-input"
-                  placeholder="Nhập mã LD-XXXX-XXXX"
-                  value={restoreInput}
-                  onChange={(e) => setRestoreInput(e.target.value)}
-                />
-                <button type="button" className="btn-secondary btn-sm" onClick={handleRestore}>
-                  Khôi phục
-                </button>
-              </div>
-            </div>
-          )}
-          {syncMsg && <div className="sync-msg">{syncMsg}</div>}
-        </section>
-      )}
-
-      <div className="filter-bar" style={{ marginTop: 20 }}>
-        <div className="cat-pills">
+      <div className="cat-pills" style={{ margin: '18px 0' }}>
+        <button
+          type="button"
+          className={`pill-btn ${gradeFilter === 'all' ? 'active' : ''}`}
+          onClick={() => setGradeFilter('all')}
+        >
+          Tất cả khối
+        </button>
+        {([6, 7, 8, 9] as GradeLevel[]).map((g) => (
           <button
+            key={g}
             type="button"
-            className={`pill-btn ${gradeFilter === 'all' ? 'active' : ''}`}
-            onClick={() => setGradeFilter('all')}
+            className={`pill-btn ${gradeFilter === g ? 'active' : ''}`}
+            onClick={() => setGradeFilter(g)}
           >
-            Tất cả khối
+            Lớp {g}
           </button>
-          {([6, 7, 8, 9] as GradeLevel[]).map((g) => (
-            <button
-              key={g}
-              type="button"
-              className={`pill-btn ${gradeFilter === g ? 'active' : ''}`}
-              onClick={() => setGradeFilter(g)}
-            >
-              Lớp {g}
-            </button>
-          ))}
-        </div>
+        ))}
       </div>
 
-      {filtered.length === 0 ? (
-        <div className="empty-state">
-          <p>Bạn chưa hoàn thành đề kiểm tra nào. Hãy chọn một đề để bắt đầu luyện tập!</p>
-          <button type="button" className="btn-primary" onClick={() => navigate('/')}>
-            Vào kho đề ngay
+      {rows.length === 0 ? (
+        <div className="panel empty-inline">
+          <p>Chưa có bài làm nào.</p>
+          <button type="button" className="btn-primary btn-sm" onClick={() => navigate('/')}>
+            Về kho đề
           </button>
         </div>
       ) : (
-        <div className="history-list">
-          {filtered.map((att) => (
-            <div key={att.id} className="history-item">
-              <div className="history-main">
-                <div className="exam-badges">
-                  <span className="book-badge">Toán Lớp {att.grade}</span>
-                  <span className={`cat-badge cat-${att.category}`}>{CATEGORY_LABELS[att.category]}</span>
-                </div>
-                <h3>{att.examTitle}</h3>
-                <div className="history-meta">
-                  <span>{new Date(att.submittedAt).toLocaleString('vi-VN')}</span>
-                  <span>· Thời gian: {formatDuration(att.durationSeconds)}</span>
-                  <span>
-                    · Đúng {att.correctCount}/{att.totalQuestions} câu
-                  </span>
-                </div>
-              </div>
-
-              <div className="history-right">
-                <div className={`score-chip ${att.score >= 8 ? 'good' : att.score >= 5 ? 'warn' : 'bad'}`}>
-                  <Award size={15} /> {att.score.toFixed(2)}đ
-                </div>
-                {!att.examId.includes('-random-') && (
-                  <button
-                    type="button"
-                    className="btn-secondary btn-sm"
-                    onClick={() => navigate(`/de/${att.examId}?mode=exam`)}
-                  >
-                    <Play size={14} /> Làm lại
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
+        <div className="panel table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Đề kiểm tra</th>
+                <th>Khối</th>
+                <th>Điểm</th>
+                <th>Đúng</th>
+                <th>Thời gian</th>
+                <th>Nộp lúc</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((att) => (
+                <tr key={att.id}>
+                  <td>
+                    <strong>{att.examTitle}</strong>
+                    <div className="cell-sub">{CATEGORY_LABELS[att.category]}</div>
+                  </td>
+                  <td>Lớp {att.grade}</td>
+                  <td>
+                    <span className={`score-badge ${att.score >= 8 ? 'good' : att.score >= 5 ? 'warn' : 'bad'}`}>
+                      {att.score.toFixed(2)}
+                    </span>
+                  </td>
+                  <td>{att.correctCount}/{att.totalQuestions}</td>
+                  <td>{formatDuration(att.durationSeconds)}</td>
+                  <td className="cell-nowrap">{new Date(att.submittedAt).toLocaleString('vi-VN')}</td>
+                  <td>
+                    {!att.examId.includes('-random-') && (
+                      <button
+                        type="button"
+                        className="btn-secondary btn-sm"
+                        onClick={() => navigate(`/de/${att.examId}?mode=exam`)}
+                      >
+                        Làm lại
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

@@ -8,6 +8,74 @@ export type ExamCategory = 'cuoi-hk1' | 'giua-hk1' | 'kiem-tra-15p' | 'on-tap-ch
 
 export type DifficultyLevel = 'nhan-biet' | 'thong-hieu' | 'van-dung' | 'van-dung-cao';
 
+export type UserRole = 'teacher' | 'student';
+
+export interface AccountPublic {
+  id: string;
+  username: string;
+  fullName: string;
+  role: UserRole;
+  grade: GradeLevel | null;
+  createdAt: string;
+}
+
+export interface ClassroomInfo {
+  id: string;
+  teacherId: string;
+  teacherName?: string;
+  name: string;
+  grade: GradeLevel;
+  code: string;
+  studentCount: number;
+  createdAt: string;
+}
+
+export interface ClassMemberInfo {
+  studentId: string;
+  username: string;
+  fullName: string;
+  grade: GradeLevel | null;
+  joinedAt: string;
+}
+
+export interface AssignmentInfo {
+  id: string;
+  teacherId: string;
+  teacherName?: string;
+  classId: string;
+  className?: string;
+  examId: string;
+  examTitle: string;
+  grade: GradeLevel;
+  note: string;
+  dueAt: string | null;
+  createdAt: string;
+  submissionCount?: number;
+  myBestScore?: number | null;
+  mySubmittedAt?: string | null;
+}
+
+export interface SubmissionRecord {
+  id: string;
+  studentId: string;
+  studentName: string;
+  studentUsername: string;
+  assignmentId: string | null;
+  classId: string | null;
+  className: string | null;
+  examId: string;
+  examTitle: string;
+  grade: GradeLevel;
+  category: ExamCategory;
+  mode: 'exam' | 'practice';
+  score: number;
+  correctCount: number;
+  totalQuestions: number;
+  durationSeconds: number;
+  answers?: Record<string, UserAnswer>;
+  submittedAt: string;
+}
+
 export interface SubjectMeta {
   id: SubjectId;
   name: string;
@@ -21,10 +89,10 @@ export interface SubjectMeta {
 export interface McqQuestion {
   id: string;
   type: 'mcq';
-  prompt: string; // Supports inline $...$ and block $$...$$ LaTeX
-  options: [string, string, string, string]; // A, B, C, D
+  prompt: string;
+  options: [string, string, string, string];
   correctIndex: 0 | 1 | 2 | 3;
-  explanation: string; // Detailed step-by-step solution with LaTeX
+  explanation: string;
   topic: string;
   difficulty: DifficultyLevel;
 }
@@ -49,8 +117,8 @@ export interface ShortAnswerQuestion {
   id: string;
   type: 'short-answer';
   prompt: string;
-  acceptedAnswers: string[]; // Normalized strings e.g. ["12", "-3/2", "-1.5"]
-  displayAnswer: string; // Pretty LaTeX display e.g. "$-\\frac{3}{2}$" or "$12$"
+  acceptedAnswers: string[];
+  displayAnswer: string;
   unit?: string;
   explanation: string;
   topic: string;
@@ -99,7 +167,7 @@ export interface ExamAttempt {
   startedAt: number;
   submittedAt: number;
   durationSeconds: number;
-  score: number; // Out of 10
+  score: number;
   correctCount: number;
   totalQuestions: number;
   answers: Record<string, UserAnswer>;
@@ -119,9 +187,9 @@ export const TEXTBOOK_LABELS: Record<TextbookSeries, string> = {
 };
 
 export const CATEGORY_LABELS: Record<ExamCategory, string> = {
-  'cuoi-hk1': 'Cuối Học kì 1',
-  'giua-hk1': 'Giữa Học kì 1',
-  'kiem-tra-15p': 'Kiểm tra 15 phút',
+  'cuoi-hk1': 'Cuối HK1',
+  'giua-hk1': 'Giữa HK1',
+  'kiem-tra-15p': '15 phút',
   'on-tap-chuong': 'Ôn tập chương',
 };
 
