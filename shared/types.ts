@@ -86,13 +86,34 @@ export interface WhiteboardPoint {
   y: number; // normalized 0..1
 }
 
-export interface WhiteboardStroke {
+export type WhiteboardTool = 'pen' | 'highlighter' | 'line' | 'rect' | 'circle' | 'text' | 'eraser' | 'laser';
+
+export type WhiteboardItem =
+  | {
+      id: string;
+      kind: 'stroke';
+      tool: 'pen' | 'highlighter' | 'line' | 'rect' | 'circle' | 'eraser';
+      authorName: string;
+      color: string;
+      width: number;
+      points: WhiteboardPoint[];
+    }
+  | {
+      id: string;
+      kind: 'text';
+      authorName: string;
+      color: string;
+      fontSize: number;
+      x: number;
+      y: number;
+      text: string;
+    };
+
+export interface BoardPage {
   id: string;
-  authorName: string;
-  color: string;
-  width: number;
-  eraser?: boolean;
-  points: WhiteboardPoint[];
+  title: string;
+  backgroundImage: string | null; // compressed data:image/jpeg;base64,...
+  items: WhiteboardItem[];
 }
 
 export interface LiveChatMessage {
@@ -114,7 +135,8 @@ export interface LiveRoomState {
   studentCanDraw: boolean;
   gridPaper: boolean;
   meetUrl: string;
-  strokes: WhiteboardStroke[];
+  pages: BoardPage[];
+  currentPageIndex: number;
   messages: LiveChatMessage[];
   participants: Array<{ id: string; name: string; role: UserRole }>;
 }

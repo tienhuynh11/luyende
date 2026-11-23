@@ -49,13 +49,13 @@ function sendJson(res: ServerResponse, status: number, body: unknown) {
   res.end(JSON.stringify(body));
 }
 
-async function readJson<T>(req: IncomingMessage): Promise<T> {
+async function readJson<T>(req: IncomingMessage, maxBytes = 1024 * 1024): Promise<T> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buf.length;
-    if (size > 1024 * 1024) throw new Error('Dữ liệu gửi lên quá lớn.');
+    if (size > maxBytes) throw new Error('Dữ liệu gửi lên quá lớn.');
     chunks.push(buf);
   }
   const raw = Buffer.concat(chunks).toString('utf8');
@@ -242,7 +242,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
     }
 
     if (path === '/api/live/action' && req.method === 'POST') {
-      const action = await readJson<LiveActionPayload>(req);
+      const action = await readJson<LiveActionPayload>(req, 3 * 1024 * 1024);
       const result = applyLiveAction(user, action);
       if (!result.ok) return sendJson(res, 403, { error: result.error });
       return sendJson(res, 200, { ok: true });

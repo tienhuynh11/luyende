@@ -1,39 +1,79 @@
 import {
+  BookOpen,
   ChevronLeft,
   ChevronRight,
+  Circle,
+  Download,
   Eraser,
   Eye,
   EyeOff,
   Grid,
+  Highlighter,
+  ImagePlus,
   Lock,
+  Maximize2,
+  MessageCircle,
+  Minimize2,
+  Minus,
+  Pen,
+  Plus,
+  Pointer,
   Radio,
   Send,
+  Square,
   Trash2,
+  Type,
   Undo2,
   Unlock,
   Users,
   Video,
+  X,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+  type PointerEvent,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { GradeLevel, LiveChatMessage, LiveRoomState, WhiteboardPoint, WhiteboardStroke } from '@shared/types';
+import type {
+  BoardPage,
+  GradeLevel,
+  LiveChatMessage,
+  LiveRoomState,
+  WhiteboardItem,
+  WhiteboardPoint,
+  WhiteboardTool,
+} from '@shared/types';
 import { MathText } from '../components/MathText';
 import { apiSendLiveAction, fetchLiveState } from '../lib/api';
 import { useAuth } from '../lib/authContext';
 import { useExams } from '../lib/examStore';
 
-const COLORS = [
+const PEN_COLORS = [
   { hex: '#1c1f21', label: 'Đen' },
   { hex: '#1d4ed8', label: 'Xanh dương' },
   { hex: '#dc2626', label: 'Đỏ' },
   { hex: '#15803d', label: 'Xanh lá' },
 ];
 
+const HIGHLIGHT_COLORS = [
+  { hex: '#facc15', label: 'Vàng' },
+  { hex: '#4ade80', label: 'Xanh lá' },
+  { hex: '#f472b6', label: 'Hồng' },
+];
+
 const WIDTHS = [
   { val: 2, label: 'Mảnh' },
   { val: 4, label: 'Vừa' },
-  { val: 8, label: 'Dày' },
+  { val: 7, label: 'Dày' },
 ];
+
+const emptyPage: BoardPage = { id: 'p1', title: 'Trang 1', backgroundImage: null, items: [] };
 
 const emptyState: LiveRoomState = {
   active: false,
@@ -42,13 +82,134 @@ const emptyState: LiveRoomState = {
   examId: null,
   questionIndex: 0,
   showSolution: false,
-  studentCanDraw: true,
+  studentCanDraw: false,
   gridPaper: true,
   meetUrl: '',
-  strokes: [],
+  pages: [emptyPage],
+  currentPageIndex: 0,
   messages: [],
   participants: [],
 };
+
+async function compressImageFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Không đọc được file ảnh.'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('File ảnh không hợp lệ.'));
+      img.onload = () => {
+        const maxDim = 1400;
+        let w = img.width;
+        let h = img.height;
+        if (w > maxDim || h > maxDim) {
+          const ratio = Math.min(maxDim / w, maxDim / h);
+          w = Math.round(w * ratio);
+          h = Math.round(h * ratio);
+        }
+        const off = document.createElement('canvas');
+        off.width = w;
+        off.height = h;
+        const ctx = off.getContext('2d');
+        if (!ctx) return reject(new Error('Trình duyệt không hỗ trợ xử lý ảnh.'));
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(off.toDataURL('image/jpeg', 0.82));
+      };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function drawItemOnCtx(ctx: CanvasRenderingContext2D, w: number, h: number, item: WhiteboardItem) {
+  ctx.save();
+  if (item.kind === 'text') {
+    ctx.fillStyle = item.color;
+    ctx.font = `600 ${item.fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+    ctx.textBaseline = 'top';
+    const lines = item.text.split('\n');
+    lines.forEach((line, idx) => {
+      ctx.fillText(line, item.x * w, item.y * h + idx * (item.fontSize * 1.3));
+    });
+    ctx.restore();
+    return;
+  }
+
+  const pts = item.points;
+  if (pts.length === 0) {
+    ctx.restore();
+    return;
+  }
+
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  if (item.tool === 'highlighter') {
+    ctx.globalAlpha = 0.32;
+    ctx.strokeStyle = item.color;
+    ctx.lineWidth = Math.max(14, item.width * 4.5);
+  } else if (item.tool === 'eraser') {
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = Math.max(14, item.width * 4);
+  } else {
+    ctx.strokeStyle = item.color;
+    ctx.lineWidth = item.width;
+  }
+
+  if (item.tool === 'line' && pts.length >= 2) {
+    const a = pts[0];
+    const b = pts[pts.length - 1];
+    ctx.beginPath();
+    ctx.moveTo(a.x * w, a.y * h);
+    ctx.lineTo(b.x * w, b.y * h);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  if (item.tool === 'rect' && pts.length >= 2) {
+    const a = pts[0];
+    const b = pts[pts.length - 1];
+    ctx.strokeRect(a.x * w, a.y * h, (b.x - a.x) * w, (b.y - a.y) * h);
+    ctx.restore();
+    return;
+  }
+
+  if (item.tool === 'circle' && pts.length >= 2) {
+    const a = pts[0];
+    const b = pts[pts.length - 1];
+    const cx = ((a.x + b.x) / 2) * w;
+    const cy = ((a.y + b.y) / 2) * h;
+    const rx = Math.abs((b.x - a.x) * w) / 2;
+    const ry = Math.abs((b.y - a.y) * h) / 2;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, Math.max(1, rx), Math.max(1, ry), 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  // Smooth quadratic Bezier curve for pen / highlighter / eraser
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x * w, pts[0].y * h);
+  if (pts.length === 1) {
+    ctx.lineTo(pts[0].x * w + 0.5, pts[0].y * h + 0.5);
+  } else if (pts.length === 2) {
+    ctx.lineTo(pts[1].x * w, pts[1].y * h);
+  } else {
+    for (let i = 1; i < pts.length - 1; i++) {
+      const mx = ((pts[i].x + pts[i + 1].x) / 2) * w;
+      const my = ((pts[i].y + pts[i + 1].y) / 2) * h;
+      ctx.quadraticCurveTo(pts[i].x * w, pts[i].y * h, mx, my);
+    }
+    const last = pts[pts.length - 1];
+    ctx.lineTo(last.x * w, last.y * h);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
 
 export function LiveClassPage() {
   const navigate = useNavigate();
@@ -58,26 +219,50 @@ export function LiveClassPage() {
   const [room, setRoom] = useState<LiveRoomState>(emptyState);
   const [connected, setConnected] = useState(false);
 
-  // Drawing controls
+  // Board tools
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const bgImgCacheRef = useRef<{ src: string; img: HTMLImageElement } | null>(null);
   const drawingRef = useRef<boolean>(false);
   const activePointsRef = useRef<WhiteboardPoint[]>([]);
+  const lastBroadcastRef = useRef<number>(0);
+
+  const [tool, setTool] = useState<WhiteboardTool>('pen');
   const [color, setColor] = useState('#1c1f21');
   const [strokeWidth, setStrokeWidth] = useState(3);
-  const [eraser, setEraser] = useState(false);
+  const [localPreview, setLocalPreview] = useState<WhiteboardItem | null>(null);
+  const [remotePreview, setRemotePreview] = useState<WhiteboardItem | null>(null);
+  const [laserPoint, setLaserPoint] = useState<WhiteboardPoint | null>(null);
+  const laserTimerRef = useRef<number | null>(null);
 
-  // Tutor spotlight selector
+  // Inline text stamp tool
+  const [textInputPos, setTextInputPos] = useState<WhiteboardPoint | null>(null);
+  const [textDraft, setTextDraft] = useState('');
+
+  // UI toggles
+  const [showExamBar, setShowExamBar] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [pickGrade, setPickGrade] = useState<GradeLevel>(6);
   const [meetDraft, setMeetDraft] = useState('');
+  const [uploadingImg, setUploadingImg] = useState(false);
 
-  // Chat
+  // Floating Chat Bubble
+  const [chatOpen, setChatOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [chatText, setChatText] = useState('');
+  const chatOpenRef = useRef(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    chatOpenRef.current = chatOpen;
+    if (chatOpen) setUnreadCount(0);
+  }, [chatOpen]);
 
   const isTeacher = user?.role === 'teacher';
   const canDraw = isTeacher || room.studentCanDraw;
+  const currentPage = room.pages[room.currentPageIndex] ?? emptyPage;
 
-  // Connect to SSE stream
+  // Connect SSE
   useEffect(() => {
     if (!user) return;
     void fetchLiveState()
@@ -96,18 +281,48 @@ export function LiveClassPage() {
         const next = JSON.parse((ev as MessageEvent).data) as LiveRoomState;
         setRoom(next);
         setMeetDraft(next.meetUrl);
+        setRemotePreview(null);
       } catch {
         // ignore
       }
     });
 
-    es.addEventListener('stroke', (ev) => {
+    es.addEventListener('item', (ev) => {
       try {
-        const stroke = JSON.parse((ev as MessageEvent).data) as WhiteboardStroke;
+        const { pageIndex, item } = JSON.parse((ev as MessageEvent).data) as {
+          pageIndex: number;
+          item: WhiteboardItem;
+        };
+        setRemotePreview(null);
         setRoom((prev) => {
-          if (prev.strokes.some((s) => s.id === stroke.id)) return prev;
-          return { ...prev, strokes: [...prev.strokes, stroke] };
+          const pages = [...prev.pages];
+          const pg = pages[pageIndex];
+          if (!pg || pg.items.some((x) => x.id === item.id)) return prev;
+          pages[pageIndex] = { ...pg, items: [...pg.items, item] };
+          return { ...prev, pages };
         });
+      } catch {
+        // ignore
+      }
+    });
+
+    es.addEventListener('preview', (ev) => {
+      try {
+        const { item } = JSON.parse((ev as MessageEvent).data) as { item: WhiteboardItem | null };
+        setRemotePreview(item);
+      } catch {
+        // ignore
+      }
+    });
+
+    es.addEventListener('laser', (ev) => {
+      try {
+        const { point } = JSON.parse((ev as MessageEvent).data) as { point: WhiteboardPoint | null };
+        setLaserPoint(point);
+        if (laserTimerRef.current) window.clearTimeout(laserTimerRef.current);
+        if (point) {
+          laserTimerRef.current = window.setTimeout(() => setLaserPoint(null), 1500);
+        }
       } catch {
         // ignore
       }
@@ -120,6 +335,9 @@ export function LiveClassPage() {
           if (prev.messages.some((m) => m.id === msg.id)) return prev;
           return { ...prev, messages: [...prev.messages, msg] };
         });
+        if (!chatOpenRef.current && msg.authorId !== user.id) {
+          setUnreadCount((c) => c + 1);
+        }
       } catch {
         // ignore
       }
@@ -141,34 +359,41 @@ export function LiveClassPage() {
   }, [user]);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [room.messages.length]);
+    if (chatOpen) {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [room.messages.length, chatOpen]);
 
-  // Render whiteboard canvas
-  const drawStrokeOnCtx = useCallback(
-    (ctx: CanvasRenderingContext2D, w: number, h: number, s: WhiteboardStroke) => {
-      if (s.points.length === 0) return;
-      ctx.save();
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.strokeStyle = s.eraser ? '#ffffff' : s.color;
-      ctx.lineWidth = s.eraser ? s.width * 3.5 : s.width;
-      ctx.beginPath();
-      const first = s.points[0];
-      ctx.moveTo(first.x * w, first.y * h);
-      if (s.points.length === 1) {
-        ctx.lineTo(first.x * w + 0.5, first.y * h + 0.5);
-      } else {
-        for (let i = 1; i < s.points.length; i++) {
-          ctx.lineTo(s.points[i].x * w, s.points[i].y * h);
+  // Support Ctrl+V paste image directly onto whiteboard for teachers!
+  useEffect(() => {
+    if (!isTeacher) return;
+    const onPaste = async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) {
+            e.preventDefault();
+            setUploadingImg(true);
+            try {
+              const dataUrl = await compressImageFile(file);
+              await apiSendLiveAction({ type: 'set-page-image', imageDataUrl: dataUrl });
+            } catch (err) {
+              alert((err as Error).message);
+            } finally {
+              setUploadingImg(false);
+            }
+            break;
+          }
         }
       }
-      ctx.stroke();
-      ctx.restore();
-    },
-    [],
-  );
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [isTeacher]);
 
+  // Redraw canvas whenever page, items, previews, laser, or image loads
   const redrawAll = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -184,12 +409,12 @@ export function LiveClassPage() {
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    // Background
+    // 1. Background fill
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, rect.width, rect.height);
 
-    // Optional math grid paper
-    if (room.gridPaper) {
+    // 2. Grid paper (when no image or underneath image margins)
+    if (room.gridPaper && !currentPage.backgroundImage) {
       ctx.strokeStyle = '#ecebe5';
       ctx.lineWidth = 1;
       const step = 24;
@@ -205,17 +430,58 @@ export function LiveClassPage() {
       ctx.stroke();
     }
 
-    for (const s of room.strokes) {
-      drawStrokeOnCtx(ctx, rect.width, rect.height, s);
+    // 3. Uploaded worksheet / theory image (aspect-fit centered)
+    if (currentPage.backgroundImage) {
+      const src = currentPage.backgroundImage;
+      const cached = bgImgCacheRef.current;
+      if (cached && cached.src === src && cached.img.complete && cached.img.naturalWidth > 0) {
+        const img = cached.img;
+        const scale = Math.min(rect.width / img.naturalWidth, rect.height / img.naturalHeight);
+        const dw = img.naturalWidth * scale;
+        const dh = img.naturalHeight * scale;
+        const dx = (rect.width - dw) / 2;
+        const dy = (rect.height - dh) / 2;
+        ctx.drawImage(img, dx, dy, dw, dh);
+      } else if (!cached || cached.src !== src) {
+        const img = new Image();
+        bgImgCacheRef.current = { src, img };
+        img.onload = () => redrawAll();
+        img.src = src;
+      }
     }
-  }, [room.strokes, room.gridPaper, drawStrokeOnCtx]);
+
+    // 4. Saved items
+    for (const it of currentPage.items) {
+      drawItemOnCtx(ctx, rect.width, rect.height, it);
+    }
+
+    // 5. Live previews (remote & local)
+    if (remotePreview) drawItemOnCtx(ctx, rect.width, rect.height, remotePreview);
+    if (localPreview) drawItemOnCtx(ctx, rect.width, rect.height, localPreview);
+
+    // 6. Laser pointer
+    if (laserPoint) {
+      const lx = laserPoint.x * rect.width;
+      const ly = laserPoint.y * rect.height;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(lx, ly, 11, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(220, 38, 38, 0.25)';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(lx, ly, 5, 0, Math.PI * 2);
+      ctx.fillStyle = '#dc2626';
+      ctx.fill();
+      ctx.restore();
+    }
+  }, [currentPage, room.gridPaper, localPreview, remotePreview, laserPoint]);
 
   useEffect(() => {
     redrawAll();
     const onResize = () => redrawAll();
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, [redrawAll]);
+  }, [redrawAll, isFullscreen]);
 
   const getNormPoint = (e: PointerEvent<HTMLCanvasElement>): WhiteboardPoint | null => {
     const canvas = canvasRef.current;
@@ -229,60 +495,170 @@ export function LiveClassPage() {
   };
 
   const handlePointerDown = (e: PointerEvent<HTMLCanvasElement>) => {
-    if (!canDraw) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
     const pt = getNormPoint(e);
     if (!pt) return;
+
+    if (tool === 'laser' && isTeacher) {
+      e.currentTarget.setPointerCapture(e.pointerId);
+      drawingRef.current = true;
+      setLaserPoint(pt);
+      void apiSendLiveAction({ type: 'laser', point: pt });
+      return;
+    }
+
+    if (!canDraw) return;
+
+    if (tool === 'text') {
+      setTextInputPos(pt);
+      setTextDraft('');
+      return;
+    }
+
+    e.currentTarget.setPointerCapture(e.pointerId);
     drawingRef.current = true;
     activePointsRef.current = [pt];
-  };
-
-  const handlePointerMove = (e: PointerEvent<HTMLCanvasElement>) => {
-    if (!drawingRef.current || !canDraw) return;
-    const pt = getNormPoint(e);
-    if (!pt) return;
-    const pts = activePointsRef.current;
-    const prev = pts[pts.length - 1];
-    if (prev && Math.hypot(pt.x - prev.x, pt.y - prev.y) < 0.0025) return;
-    pts.push(pt);
-
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (canvas && ctx) {
-      const rect = canvas.getBoundingClientRect();
-      drawStrokeOnCtx(ctx, rect.width, rect.height, {
-        id: 'live',
-        authorName: user?.fullName ?? '',
-        color,
-        width: strokeWidth,
-        eraser,
-        points: prev ? [prev, pt] : [pt],
-      });
-    }
-  };
-
-  const finishStroke = () => {
-    if (!drawingRef.current) return;
-    drawingRef.current = false;
-    const points = activePointsRef.current;
-    activePointsRef.current = [];
-    if (points.length === 0) return;
-
-    const stroke: WhiteboardStroke = {
-      id: `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+    setLocalPreview({
+      id: 'preview',
+      kind: 'stroke',
+      tool: tool === 'highlighter' || tool === 'line' || tool === 'rect' || tool === 'circle' || tool === 'eraser' ? tool : 'pen',
       authorName: user?.fullName ?? '',
       color,
       width: strokeWidth,
-      eraser,
-      points,
-    };
-    setRoom((prev) => ({ ...prev, strokes: [...prev.strokes, stroke] }));
-    void apiSendLiveAction({ type: 'add-stroke', stroke }).catch(() => {});
+      points: [pt],
+    });
   };
 
-  const spotlightExam = room.examId ? getExam(room.examId) : undefined;
-  const spotlightQuestion = spotlightExam?.questions[room.questionIndex];
-  const gradeExams = useMemo(() => allExams.filter((e) => e.grade === pickGrade), [allExams, pickGrade]);
+  const handlePointerMove = (e: PointerEvent<HTMLCanvasElement>) => {
+    if (!drawingRef.current) return;
+    const pt = getNormPoint(e);
+    if (!pt) return;
+
+    const now = Date.now();
+    if (tool === 'laser' && isTeacher) {
+      setLaserPoint(pt);
+      if (now - lastBroadcastRef.current > 60) {
+        lastBroadcastRef.current = now;
+        void apiSendLiveAction({ type: 'laser', point: pt });
+      }
+      return;
+    }
+
+    if (!canDraw) return;
+    const pts = activePointsRef.current;
+    const prev = pts[pts.length - 1];
+    if (prev && Math.hypot(pt.x - prev.x, pt.y - prev.y) < 0.002) return;
+
+    if (tool === 'line' || tool === 'rect' || tool === 'circle') {
+      activePointsRef.current = [pts[0], pt];
+    } else {
+      pts.push(pt);
+    }
+
+    const previewItem: WhiteboardItem = {
+      id: 'preview',
+      kind: 'stroke',
+      tool: tool === 'highlighter' || tool === 'line' || tool === 'rect' || tool === 'circle' || tool === 'eraser' ? tool : 'pen',
+      authorName: user?.fullName ?? '',
+      color,
+      width: strokeWidth,
+      points: [...activePointsRef.current],
+    };
+    setLocalPreview(previewItem);
+
+    if (now - lastBroadcastRef.current > 80) {
+      lastBroadcastRef.current = now;
+      void apiSendLiveAction({ type: 'live-preview', item: previewItem });
+    }
+  };
+
+  const finishPointer = () => {
+    if (!drawingRef.current) return;
+    drawingRef.current = false;
+
+    if (tool === 'laser' && isTeacher) {
+      setLaserPoint(null);
+      void apiSendLiveAction({ type: 'laser', point: null });
+      return;
+    }
+
+    const points = activePointsRef.current;
+    activePointsRef.current = [];
+    setLocalPreview(null);
+    if (points.length === 0) return;
+
+    const item: WhiteboardItem = {
+      id: `i-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      kind: 'stroke',
+      tool: tool === 'highlighter' || tool === 'line' || tool === 'rect' || tool === 'circle' || tool === 'eraser' ? tool : 'pen',
+      authorName: user?.fullName ?? '',
+      color,
+      width: strokeWidth,
+      points,
+    };
+
+    setRoom((prev) => {
+      const pages = [...prev.pages];
+      const pg = pages[prev.currentPageIndex];
+      if (!pg) return prev;
+      pages[prev.currentPageIndex] = { ...pg, items: [...pg.items, item] };
+      return { ...prev, pages };
+    });
+    void apiSendLiveAction({ type: 'add-item', item }).catch(() => {});
+  };
+
+  const handleCommitText = (e?: FormEvent) => {
+    e?.preventDefault();
+    if (!textInputPos || !textDraft.trim()) {
+      setTextInputPos(null);
+      setTextDraft('');
+      return;
+    }
+    const item: WhiteboardItem = {
+      id: `t-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      kind: 'text',
+      authorName: user?.fullName ?? '',
+      color: tool === 'highlighter' ? '#1c1f21' : color,
+      fontSize: strokeWidth >= 7 ? 24 : strokeWidth >= 4 ? 19 : 16,
+      x: textInputPos.x,
+      y: textInputPos.y,
+      text: textDraft.trim(),
+    };
+    setTextInputPos(null);
+    setTextDraft('');
+    setRoom((prev) => {
+      const pages = [...prev.pages];
+      const pg = pages[prev.currentPageIndex];
+      if (!pg) return prev;
+      pages[prev.currentPageIndex] = { ...pg, items: [...pg.items, item] };
+      return { ...prev, pages };
+    });
+    void apiSendLiveAction({ type: 'add-item', item }).catch(() => {});
+  };
+
+  const handleUploadImage = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploadingImg(true);
+    try {
+      const dataUrl = await compressImageFile(file);
+      await apiSendLiveAction({ type: 'set-page-image', imageDataUrl: dataUrl });
+    } catch (err) {
+      alert((err as Error).message);
+    } finally {
+      setUploadingImg(false);
+    }
+  };
+
+  const handleDownloadPng = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const url = canvas.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `bang-giang-${currentPage.title.toLowerCase().replace(/\s+/g, '-')}.png`;
+    a.click();
+  };
 
   const handleSendChat = async (e: FormEvent) => {
     e.preventDefault();
@@ -295,6 +671,10 @@ export function LiveClassPage() {
       // ignore
     }
   };
+
+  const spotlightExam = room.examId ? getExam(room.examId) : undefined;
+  const spotlightQuestion = spotlightExam?.questions[room.questionIndex];
+  const gradeExams = useMemo(() => allExams.filter((e) => e.grade === pickGrade), [allExams, pickGrade]);
 
   if (authLoading) {
     return <div className="container"><div className="panel">Đang tải...</div></div>;
@@ -314,9 +694,11 @@ export function LiveClassPage() {
     );
   }
 
+  const activePalette = tool === 'highlighter' ? HIGHLIGHT_COLORS : PEN_COLORS;
+
   return (
-    <div className="container live-page">
-      {/* HEADER PHÒNG HỌC */}
+    <div className={isFullscreen ? 'live-fullscreen' : 'container live-page'}>
+      {/* THANH TRẠNG THÁI GỌN NHẸ */}
       <div className="live-head panel">
         <div className="live-head-left">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -325,33 +707,42 @@ export function LiveClassPage() {
               <Radio size={13} /> {room.active ? 'Đang mở' : 'Chưa mở'}
             </span>
             <span className="muted-inline">
-              <Users size={14} style={{ verticalAlign: -2 }} /> {room.participants.length} người trong phòng
+              <Users size={14} style={{ verticalAlign: -2 }} /> {room.participants.length}
               {room.participants.length > 0 && ` (${room.participants.map((p) => p.name).join(', ')})`}
             </span>
           </div>
-          {!connected && <div className="cell-sub">Đang kết nối lại máy chủ...</div>}
+          {!connected && <div className="cell-sub">Đang kết nối lại...</div>}
         </div>
 
         <div className="live-head-actions">
           {room.meetUrl && (
             <a href={room.meetUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm">
-              <Video size={15} /> Mở gọi thoại / Video
+              <Video size={15} /> Gọi thoại / Video
             </a>
           )}
           {isTeacher && (
-            <button
-              type="button"
-              className={room.active ? 'btn-secondary btn-sm' : 'btn-primary btn-sm'}
-              onClick={() => void apiSendLiveAction({ type: 'set-active', active: !room.active })}
-            >
-              {room.active ? 'Đóng phòng học' : 'Mở phòng (báo học sinh)'}
-            </button>
+            <>
+              <button
+                type="button"
+                className={`btn-secondary btn-sm ${showExamBar ? 'active-btn' : ''}`}
+                onClick={() => setShowExamBar((v) => !v)}
+              >
+                <BookOpen size={15} /> Chiếu đề & Link gọi
+              </button>
+              <button
+                type="button"
+                className={room.active ? 'btn-secondary btn-sm' : 'btn-primary btn-sm'}
+                onClick={() => void apiSendLiveAction({ type: 'set-active', active: !room.active })}
+              >
+                {room.active ? 'Đóng phòng' : 'Mở phòng (báo HS)'}
+              </button>
+            </>
           )}
         </div>
       </div>
 
-      {/* THANH CHỌN ĐỀ CHIẾU LÊN BẢNG (CHỈ GIA SƯ) */}
-      {isTeacher && (
+      {/* THANH CHIẾU ĐỀ & LINK GỌI (THU GỌN ĐƯỢC) */}
+      {isTeacher && showExamBar && (
         <div className="panel live-controls">
           <div className="live-ctrl-row">
             <select
@@ -367,7 +758,7 @@ export function LiveClassPage() {
 
             <select
               className="select-input"
-              style={{ flex: 1, minWidth: 200 }}
+              style={{ flex: 1, minWidth: 190 }}
               value={room.examId ?? ''}
               onChange={(e) =>
                 void apiSendLiveAction({
@@ -378,7 +769,7 @@ export function LiveClassPage() {
                 })
               }
             >
-              <option value="">-- Chọn đề để chiếu câu hỏi cho học sinh --</option>
+              <option value="">-- Không chiếu câu hỏi kho đề --</option>
               {gradeExams.map((ex) => (
                 <option key={ex.id} value={ex.id}>{ex.title}</option>
               ))}
@@ -397,12 +788,11 @@ export function LiveClassPage() {
                 className="btn-secondary btn-sm"
                 onClick={() => void apiSendLiveAction({ type: 'set-options', meetUrl: meetDraft })}
               >
-                Lưu link gọi
+                Lưu link
               </button>
               <button
                 type="button"
                 className="btn-secondary btn-sm"
-                title="Tạo phòng gọi thoại/video miễn phí bằng Jitsi"
                 onClick={() => {
                   const url = `https://meet.jit.si/LuyenDeTHCS-${Date.now().toString(36).slice(-5)}`;
                   setMeetDraft(url);
@@ -416,7 +806,7 @@ export function LiveClassPage() {
         </div>
       )}
 
-      {/* CÂU HỎI ĐANG CHIẾU ĐỒNG BỘ */}
+      {/* CÂU HỎI ĐANG CHIẾU (NẾU CÓ) */}
       {spotlightExam && spotlightQuestion && (
         <section className="panel spotlight-box">
           <div className="spotlight-head">
@@ -438,7 +828,7 @@ export function LiveClassPage() {
                     })
                   }
                 >
-                  <ChevronLeft size={15} /> Câu trước
+                  <ChevronLeft size={15} /> Trước
                 </button>
                 <button
                   type="button"
@@ -453,7 +843,7 @@ export function LiveClassPage() {
                     })
                   }
                 >
-                  Câu sau <ChevronRight size={15} />
+                  Sau <ChevronRight size={15} />
                 </button>
                 <button
                   type="button"
@@ -468,7 +858,15 @@ export function LiveClassPage() {
                   }
                 >
                   {room.showSolution ? <EyeOff size={15} /> : <Eye size={15} />}
-                  {room.showSolution ? 'Ẩn lời giải' : 'Hiện lời giải'}
+                  {room.showSolution ? 'Ẩn giải' : 'Hiện giải'}
+                </button>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  title="Tắt khung câu hỏi"
+                  onClick={() => void apiSendLiveAction({ type: 'set-spotlight', examId: null })}
+                >
+                  <X size={15} />
                 </button>
               </div>
             )}
@@ -491,19 +889,6 @@ export function LiveClassPage() {
             </div>
           )}
 
-          {spotlightQuestion.type === 'true-false' && (
-            <div className="spotlight-opts">
-              {spotlightQuestion.statements.map((st) => (
-                <div key={st.label} className="spotlight-opt">
-                  <strong>{st.label})</strong> <MathText text={st.text} />
-                  {room.showSolution && (
-                    <span className="tag" style={{ marginLeft: 8 }}>{st.isTrue ? 'Đúng' : 'Sai'}</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
           {room.showSolution && (
             <div className="solution-box">
               <div className="solution-title">Lời giải chi tiết</div>
@@ -515,55 +900,191 @@ export function LiveClassPage() {
         </section>
       )}
 
-      {/* BẢNG TRẮNG + CHAT TRỰC TIẾP */}
-      <div className="live-grid">
-        <section className="panel board-panel">
-          <div className="wb-toolbar">
-            <div className="wb-group">
-              {COLORS.map((c) => (
-                <button
-                  key={c.hex}
-                  type="button"
-                  className={`color-dot ${!eraser && color === c.hex ? 'active' : ''}`}
-                  style={{ background: c.hex }}
-                  title={c.label}
-                  onClick={() => {
-                    setEraser(false);
-                    setColor(c.hex);
-                  }}
-                />
-              ))}
-              {WIDTHS.map((w) => (
-                <button
-                  key={w.val}
-                  type="button"
-                  className={`pill-btn ${!eraser && strokeWidth === w.val ? 'active' : ''}`}
-                  style={{ padding: '3px 8px', fontSize: 12 }}
-                  onClick={() => {
-                    setEraser(false);
-                    setStrokeWidth(w.val);
-                  }}
-                >
-                  {w.label}
-                </button>
-              ))}
+      {/* BẢNG GIẢNG BÀI TOÀN CHIỀU RỘNG */}
+      <section className="panel board-panel full-board">
+        {/* Thanh chuyển trang (Trang 1, Trang 2...) + Up ảnh đề bài */}
+        <div className="page-tabs-bar">
+          <div className="page-tabs-scroll">
+            {room.pages.map((pg, idx) => (
+              <button
+                key={pg.id}
+                type="button"
+                disabled={!isTeacher}
+                className={`page-tab ${idx === room.currentPageIndex ? 'active' : ''}`}
+                onClick={() => isTeacher && void apiSendLiveAction({ type: 'switch-page', index: idx })}
+              >
+                {pg.title}
+                {pg.backgroundImage ? ' · Ảnh' : ''}
+              </button>
+            ))}
+            {isTeacher && (
               <button
                 type="button"
-                className={`pill-btn ${eraser ? 'active' : ''}`}
-                style={{ padding: '4px 8px', fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                onClick={() => setEraser((v) => !v)}
+                className="page-tab add"
+                title="Thêm trang bảng mới"
+                onClick={() => void apiSendLiveAction({ type: 'add-page' })}
               >
-                <Eraser size={14} /> Tẩy
+                <Plus size={14} /> Thêm trang
+              </button>
+            )}
+          </div>
+
+          <div className="wb-group">
+            {isTeacher && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={handleUploadImage}
+                />
+                <button
+                  type="button"
+                  className="btn-primary btn-sm"
+                  disabled={uploadingImg}
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Tải ảnh đề bài, chụp trang sách hoặc dán ảnh (Ctrl+V) để sửa trực tiếp lên trên"
+                >
+                  <ImagePlus size={15} /> {uploadingImg ? 'Đang tải...' : 'Up ảnh đề / bài tập'}
+                </button>
+                {currentPage.backgroundImage && (
+                  <button
+                    type="button"
+                    className="btn-secondary btn-sm"
+                    onClick={() => void apiSendLiveAction({ type: 'set-page-image', imageDataUrl: null })}
+                  >
+                    Bỏ ảnh
+                  </button>
+                )}
+              </>
+            )}
+            <button type="button" className="icon-btn" title="Lưu ảnh bảng (PNG)" onClick={handleDownloadPng}>
+              <Download size={16} />
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              title={isFullscreen ? 'Thu nhỏ' : 'Mở rộng toàn màn hình'}
+              onClick={() => setIsFullscreen((v) => !v)}
+            >
+              {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            </button>
+          </div>
+        </div>
+
+        {/* Thanh công cụ vẽ & giảng bài */}
+        {canDraw ? (
+          <div className="wb-toolbar">
+            <div className="wb-group">
+              <button
+                type="button"
+                className={`tool-btn ${tool === 'pen' ? 'active' : ''}`}
+                title="Bút viết"
+                onClick={() => {
+                  setTool('pen');
+                  if (!PEN_COLORS.some((c) => c.hex === color)) setColor('#1c1f21');
+                }}
+              >
+                <Pen size={16} />
+                <span className="hide-xs">Bút</span>
+              </button>
+              <button
+                type="button"
+                className={`tool-btn ${tool === 'highlighter' ? 'active' : ''}`}
+                title="Bút dạ quang (đánh dấu lý thuyết / đề bài)"
+                onClick={() => {
+                  setTool('highlighter');
+                  setColor('#facc15');
+                }}
+              >
+                <Highlighter size={16} />
+                <span className="hide-xs">Dạ quang</span>
+              </button>
+              <button
+                type="button"
+                className={`tool-btn ${tool === 'line' ? 'active' : ''}`}
+                title="Vẽ đường thẳng (Hình học)"
+                onClick={() => setTool('line')}
+              >
+                <Minus size={16} />
+              </button>
+              <button
+                type="button"
+                className={`tool-btn ${tool === 'rect' ? 'active' : ''}`}
+                title="Vẽ khung chữ nhật"
+                onClick={() => setTool('rect')}
+              >
+                <Square size={15} />
+              </button>
+              <button
+                type="button"
+                className={`tool-btn ${tool === 'circle' ? 'active' : ''}`}
+                title="Vẽ hình tròn / khoanh đáp án"
+                onClick={() => setTool('circle')}
+              >
+                <Circle size={15} />
+              </button>
+              <button
+                type="button"
+                className={`tool-btn ${tool === 'text' ? 'active' : ''}`}
+                title="Chèn chữ / ghi chú lên bảng"
+                onClick={() => setTool('text')}
+              >
+                <Type size={16} />
+              </button>
+              {isTeacher && (
+                <button
+                  type="button"
+                  className={`tool-btn ${tool === 'laser' ? 'active' : ''}`}
+                  title="Tia laser chỉ bài (không để lại nét)"
+                  onClick={() => setTool('laser')}
+                >
+                  <Pointer size={16} />
+                </button>
+              )}
+              <button
+                type="button"
+                className={`tool-btn ${tool === 'eraser' ? 'active' : ''}`}
+                title="Tẩy"
+                onClick={() => setTool('eraser')}
+              >
+                <Eraser size={16} />
               </button>
             </div>
 
             <div className="wb-group">
+              {tool !== 'eraser' && tool !== 'laser' && (
+                <>
+                  {activePalette.map((c) => (
+                    <button
+                      key={c.hex}
+                      type="button"
+                      className={`color-dot ${color === c.hex ? 'active' : ''}`}
+                      style={{ background: c.hex }}
+                      title={c.label}
+                      onClick={() => setColor(c.hex)}
+                    />
+                  ))}
+                  {WIDTHS.map((w) => (
+                    <button
+                      key={w.val}
+                      type="button"
+                      className={`pill-btn ${strokeWidth === w.val ? 'active' : ''}`}
+                      style={{ padding: '3px 7px', fontSize: 12 }}
+                      onClick={() => setStrokeWidth(w.val)}
+                    >
+                      {w.label}
+                    </button>
+                  ))}
+                </>
+              )}
+
               <button
                 type="button"
                 className="icon-btn"
-                title="Hoàn tác nét vừa vẽ"
-                disabled={!canDraw}
-                onClick={() => void apiSendLiveAction({ type: 'undo-stroke' })}
+                title="Hoàn tác"
+                onClick={() => void apiSendLiveAction({ type: 'undo-item' })}
               >
                 <Undo2 size={16} />
               </button>
@@ -573,7 +1094,7 @@ export function LiveClassPage() {
                   <button
                     type="button"
                     className="icon-btn"
-                    title={room.gridPaper ? 'Chuyển nền trắng' : 'Bật ô ly vở toán'}
+                    title={room.gridPaper ? 'Tắt ô ly' : 'Bật ô ly vở toán'}
                     onClick={() => void apiSendLiveAction({ type: 'set-options', gridPaper: !room.gridPaper })}
                   >
                     <Grid size={16} />
@@ -581,7 +1102,7 @@ export function LiveClassPage() {
                   <button
                     type="button"
                     className="icon-btn"
-                    title={room.studentCanDraw ? 'Khóa học sinh viết bảng' : 'Cho phép học sinh cùng viết bảng'}
+                    title={room.studentCanDraw ? 'Đang cho HS cùng viết — bấm để khóa' : 'Đang khóa HS viết — bấm để mở'}
                     onClick={() =>
                       void apiSendLiveAction({ type: 'set-options', studentCanDraw: !room.studentCanDraw })
                     }
@@ -591,10 +1112,10 @@ export function LiveClassPage() {
                   <button
                     type="button"
                     className="icon-btn"
-                    title="Xóa toàn bộ bảng"
+                    title="Xóa toàn bộ nét vẽ trên trang này"
                     onClick={() => {
-                      if (window.confirm('Xóa sạch bảng trắng?')) {
-                        void apiSendLiveAction({ type: 'clear-board' });
+                      if (window.confirm('Xóa toàn bộ nét vẽ trên trang này? (Ảnh nền vẫn giữ nguyên)')) {
+                        void apiSendLiveAction({ type: 'clear-page', includeImage: false });
                       }
                     }}
                   >
@@ -604,61 +1125,113 @@ export function LiveClassPage() {
               )}
             </div>
           </div>
+        ) : (
+          <div className="wb-readonly-bar">
+            <span>Đang xem bảng giảng bài trực tiếp ({currentPage.title})</span>
+            <span className="muted-inline">Gia sư đang giữ quyền viết bảng</span>
+          </div>
+        )}
 
-          {!canDraw && (
-            <div className="cell-sub" style={{ marginBottom: 6 }}>
-              Chế độ chỉ xem (gia sư đang khóa quyền viết bảng của học sinh).
-            </div>
+        {isTeacher && !currentPage.backgroundImage && (
+          <div className="cell-sub" style={{ marginBottom: 6 }}>
+            Mẹo: Bấm <strong>Up ảnh đề / bài tập</strong> (hoặc dán ảnh chụp màn hình bằng <strong>Ctrl+V</strong>) để chữa bài tập lý thuyết trực tiếp lên ảnh.
+          </div>
+        )}
+
+        {/* KHUNG CANVAS */}
+        <div className={`wb-canvas-wrap ${isFullscreen ? 'is-full' : ''}`}>
+          <canvas
+            ref={canvasRef}
+            className={`wb-canvas ${canDraw || (tool === 'laser' && isTeacher) ? 'drawable' : ''}`}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={finishPointer}
+            onPointerCancel={finishPointer}
+          />
+
+          {/* Ô nhập chữ trực tiếp trên bảng */}
+          {textInputPos && (
+            <form
+              className="wb-text-overlay"
+              style={{
+                left: `${Math.min(72, Math.max(2, textInputPos.x * 100))}%`,
+                top: `${Math.min(82, Math.max(2, textInputPos.y * 100))}%`,
+              }}
+              onSubmit={handleCommitText}
+            >
+              <input
+                type="text"
+                autoFocus
+                placeholder="Nhập chữ rồi nhấn Enter..."
+                value={textDraft}
+                onChange={(e) => setTextDraft(e.target.value)}
+                onBlur={() => handleCommitText()}
+              />
+            </form>
           )}
+        </div>
+      </section>
 
-          <div className="wb-canvas-wrap">
-            <canvas
-              ref={canvasRef}
-              className={`wb-canvas ${canDraw ? 'drawable' : ''}`}
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={finishStroke}
-              onPointerCancel={finishStroke}
-            />
-          </div>
-        </section>
+      {/* BONG BÓNG CHAT NỔI (CHO CẢ MOBILE & PC) */}
+      <div className="chat-fab-wrap">
+        {chatOpen && (
+          <div className="chat-popup">
+            <div className="chat-popup-head">
+              <div>
+                <strong>Trao đổi trực tiếp</strong>
+                <div className="cell-sub">Hỗ trợ gõ công thức $x^2$, $\frac{'{a}{b}'}$</div>
+              </div>
+              <button type="button" className="icon-btn" onClick={() => setChatOpen(false)} aria-label="Đóng chat">
+                <X size={16} />
+              </button>
+            </div>
 
-        {/* KHUNG CHAT & CÔNG THỨC TOÁN */}
-        <section className="panel chat-panel">
-          <div className="chat-head">
-            <strong>Trao đổi & Gõ công thức</strong>
-            <small className="muted-inline">Hỗ trợ $x^2$, $\frac{'{a}{b}'}$</small>
+            <div className="chat-messages">
+              {room.messages.length === 0 ? (
+                <div className="empty-inline">Chưa có tin nhắn nào.</div>
+              ) : (
+                room.messages.map((m) => {
+                  const isMine = m.authorId === user.id;
+                  return (
+                    <div key={m.id} className={`chat-bubble ${isMine ? 'mine' : 'other'}`}>
+                      {!isMine && <div className="chat-author">{m.authorName}</div>}
+                      <div className="chat-msg-body">
+                        <MathText text={m.text} />
+                      </div>
+                      <div className="chat-time">
+                        {new Date(m.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            <form onSubmit={handleSendChat} className="chat-form">
+              <input
+                type="text"
+                placeholder="Nhắn tin hoặc gõ $công thức$..."
+                value={chatText}
+                onChange={(e) => setChatText(e.target.value)}
+              />
+              <button type="submit" className="btn-primary btn-sm" aria-label="Gửi">
+                <Send size={15} />
+              </button>
+            </form>
           </div>
-          <div className="chat-messages">
-            {room.messages.length === 0 ? (
-              <div className="empty-inline">Chưa có tin nhắn. Gõ công thức hoặc trao đổi trực tiếp tại đây.</div>
-            ) : (
-              room.messages.map((m) => (
-                <div key={m.id} className={`chat-msg ${m.role === 'teacher' ? 'is-teacher' : ''}`}>
-                  <div className="chat-msg-head">
-                    <strong>{m.authorName}</strong>
-                    <small>{new Date(m.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</small>
-                  </div>
-                  <div className="chat-msg-body">
-                    <MathText text={m.text} />
-                  </div>
-                </div>
-              ))
-            )}
-            <div ref={chatEndRef} />
-          </div>
-          <form onSubmit={handleSendChat} className="chat-form">
-            <input
-              type="text"
-              placeholder="Nhắn tin hoặc gõ $công thức$..."
-              value={chatText}
-              onChange={(e) => setChatText(e.target.value)}
-            />
-            <button type="submit" className="btn-primary btn-sm" aria-label="Gửi">
-              <Send size={15} />
-            </button>
-          </form>
-        </section>
+        )}
+
+        <button
+          type="button"
+          className="chat-fab"
+          onClick={() => setChatOpen((v) => !v)}
+          aria-label="Mở khung chat"
+          title="Trao đổi trực tiếp"
+        >
+          {chatOpen ? <X size={22} /> : <MessageCircle size={22} />}
+          {!chatOpen && unreadCount > 0 && <span className="chat-fab-badge">{unreadCount}</span>}
+        </button>
       </div>
     </div>
   );

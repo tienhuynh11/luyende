@@ -10,7 +10,8 @@ import type {
   SubmissionRecord,
   UserAnswer,
   UserRole,
-  WhiteboardStroke,
+  WhiteboardItem,
+  WhiteboardPoint,
 } from '@shared/types';
 
 export interface StoredExamDto {
@@ -191,9 +192,15 @@ export type LiveActionClientPayload =
   | { type: 'set-active'; active: boolean }
   | { type: 'set-spotlight'; examId: string | null; questionIndex?: number; showSolution?: boolean }
   | { type: 'set-options'; studentCanDraw?: boolean; gridPaper?: boolean; meetUrl?: string }
-  | { type: 'add-stroke'; stroke: WhiteboardStroke }
-  | { type: 'undo-stroke' }
-  | { type: 'clear-board' }
+  | { type: 'add-item'; item: WhiteboardItem }
+  | { type: 'live-preview'; item: WhiteboardItem | null }
+  | { type: 'laser'; point: WhiteboardPoint | null }
+  | { type: 'undo-item' }
+  | { type: 'clear-page'; includeImage?: boolean }
+  | { type: 'set-page-image'; imageDataUrl: string | null }
+  | { type: 'add-page'; imageDataUrl?: string | null; title?: string }
+  | { type: 'switch-page'; index: number }
+  | { type: 'delete-page'; index: number }
   | { type: 'chat'; text: string };
 
 export function apiSendLiveAction(action: LiveActionClientPayload): Promise<{ ok: boolean }> {
