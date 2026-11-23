@@ -1,4 +1,4 @@
-import { Bell, LogOut, Moon, Sun } from 'lucide-react';
+import { Bell, BookOpen, ClipboardList, History, LogIn, LogOut, Moon, Sun } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { apiMarkAllReviewed } from '../lib/api';
@@ -20,7 +20,8 @@ export function Layout({ theme, onToggleTheme, children }: LayoutProps) {
 
   const isHome = location.pathname === '/';
   const isHistory = location.pathname === '/lich-su';
-  const isTeacher = location.pathname === '/giao-vien';
+  const isTeacher = location.pathname.startsWith('/giao-vien');
+  const isLogin = location.pathname === '/dang-nhap';
 
   useEffect(() => {
     setNotifOpen(false);
@@ -59,21 +60,21 @@ export function Layout({ theme, onToggleTheme, children }: LayoutProps) {
             <span className="brand-mark">T</span>
             <span className="brand-text">
               <strong>LuyệnĐề THCS</strong>
-              <small>Chương trình GDPT 2018</small>
+              <small className="hide-xs">Chương trình GDPT 2018</small>
             </span>
           </Link>
 
           <nav className="topnav">
-            <Link to="/" className={`nav-link ${isHome ? 'active' : ''}`}>
+            <Link to="/" className={`nav-link desktop-only ${isHome ? 'active' : ''}`}>
               Kho đề
             </Link>
             {user?.role === 'teacher' && (
-              <Link to="/giao-vien" className={`nav-link ${isTeacher ? 'active' : ''}`}>
+              <Link to="/giao-vien" className={`nav-link desktop-only ${isTeacher ? 'active' : ''}`}>
                 Giao bài & Điểm
                 {notifications.length > 0 && <span className="nav-count">{notifications.length}</span>}
               </Link>
             )}
-            <Link to="/lich-su" className={`nav-link ${isHistory ? 'active' : ''}`}>
+            <Link to="/lich-su" className={`nav-link desktop-only ${isHistory ? 'active' : ''}`}>
               Lịch sử
             </Link>
 
@@ -86,7 +87,7 @@ export function Layout({ theme, onToggleTheme, children }: LayoutProps) {
                   title="Thông báo cần xử lý"
                   aria-label="Thông báo cần xử lý"
                 >
-                  <Bell size={17} />
+                  <Bell size={18} />
                   {notifications.length > 0 && <span className="notif-badge">{notifications.length}</span>}
                 </button>
 
@@ -144,7 +145,7 @@ export function Layout({ theme, onToggleTheme, children }: LayoutProps) {
                   </button>
                 </div>
               ) : (
-                <Link to="/dang-nhap" className="btn-primary btn-sm">
+                <Link to="/dang-nhap" className="btn-primary btn-sm desktop-only">
                   Đăng nhập
                 </Link>
               )
@@ -171,6 +172,36 @@ export function Layout({ theme, onToggleTheme, children }: LayoutProps) {
           <span>Trắc nghiệm tự động chấm điểm kèm lời giải chi tiết</span>
         </div>
       </footer>
+
+      {/* Thanh điều hướng dưới cùng dành riêng cho Mobile */}
+      <nav className="mobile-bottom-nav" aria-label="Điều hướng điện thoại">
+        <Link to="/" className={`mb-item ${isHome ? 'active' : ''}`}>
+          <BookOpen size={20} />
+          <span>Kho đề</span>
+        </Link>
+
+        {user?.role === 'teacher' && (
+          <Link to="/giao-vien" className={`mb-item ${isTeacher ? 'active' : ''}`}>
+            <span className="mb-icon-wrap">
+              <ClipboardList size={20} />
+              {notifications.length > 0 && <i className="mb-dot">{notifications.length}</i>}
+            </span>
+            <span>Giao bài</span>
+          </Link>
+        )}
+
+        <Link to="/lich-su" className={`mb-item ${isHistory ? 'active' : ''}`}>
+          <History size={20} />
+          <span>Lịch sử</span>
+        </Link>
+
+        {config.dbEnabled && !user && (
+          <Link to="/dang-nhap" className={`mb-item ${isLogin ? 'active' : ''}`}>
+            <LogIn size={20} />
+            <span>Đăng nhập</span>
+          </Link>
+        )}
+      </nav>
     </div>
   );
 }

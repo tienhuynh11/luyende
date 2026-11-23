@@ -81,6 +81,7 @@ h3 {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow-x: clip;
 }
 
 .main-content {
@@ -1966,6 +1967,10 @@ h3 {
   gap: 8px;
 }
 
+.mobile-bottom-nav {
+  display: none;
+}
+
 /* RESPONSIVE */
 @media (max-width: 960px) {
   .exam-grid {
@@ -2010,9 +2015,113 @@ h3 {
   }
 }
 
+@media (max-width: 768px) {
+  .desktop-only {
+    display: none !important;
+  }
+
+  .main-content {
+    padding: 16px 0 calc(80px + env(safe-area-inset-bottom));
+  }
+
+  .footer {
+    padding-bottom: calc(74px + env(safe-area-inset-bottom));
+  }
+
+  .mobile-bottom-nav {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 45;
+    background: var(--surface);
+    border-top: 1px solid var(--line);
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+    justify-content: space-around;
+    align-items: center;
+  }
+
+  .mb-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 4px 2px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--muted);
+    min-height: 44px;
+  }
+
+  .mb-item.active {
+    color: var(--accent);
+  }
+
+  .mb-icon-wrap {
+    position: relative;
+    display: inline-flex;
+  }
+
+  .mb-dot {
+    position: absolute;
+    top: -5px;
+    right: -9px;
+    font-style: normal;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: var(--bad);
+    color: #fff;
+    font-size: 10.5px;
+    font-weight: 700;
+    display: grid;
+    place-items: center;
+  }
+
+  .tab-strip {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .table-wrap,
+  .subject-bar,
+  .grade-tabs {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Chống iOS Safari tự zoom khi chạm vào ô nhập liệu */
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  .user-name {
+    max-width: 115px;
+  }
+}
+
 @media (max-width: 640px) {
   .container {
     padding: 0 12px;
+  }
+
+  .topbar-inner {
+    padding: 8px 12px;
+  }
+
+  .notif-dropdown {
+    position: fixed;
+    top: 56px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-width: none;
   }
 
   .exam-grid,
@@ -2026,6 +2135,23 @@ h3 {
   .tf-row {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .tf-actions {
+    width: 100%;
+  }
+
+  .tf-btn {
+    flex: 1;
+    min-height: 42px;
+  }
+
+  .mcq-opt {
+    min-height: 50px;
+  }
+
+  .q-nav-btn {
+    height: 42px;
   }
 
   .result-banner {
@@ -2051,5 +2177,15 @@ h3 {
 
   .hide-xs {
     display: none;
+  }
+}
+
+@media (max-width: 390px) {
+  .exam-card-actions.teacher-3 {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .exam-card-actions.teacher-3 > :first-child {
+    grid-column: 1 / -1;
   }
 }
