@@ -1,0 +1,16 @@
+{
+  "name": "LuyệnĐề THCS",
+  "short_name": "LuyệnĐề",
+  "description": "Luyện đề kiểm tra trắc nghiệm THCS theo chương trình GDPT 2018 kèm lời giải chi tiết",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f5f0",
+  "theme_color": "#1f5f4f",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

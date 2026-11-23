@@ -1,0 +1,14 @@
+# Render Blueprint: một dịch vụ Docker phục vụ cả giao diện lẫn API.
+# Dùng: Render dashboard → New → Blueprint → chọn repo này.
+# Không bắt buộc biến môi trường nào; có thể thêm DATABASE_URL (Neon Postgres) nếu muốn đồng bộ lịch sử làm bài giữa các thiết bị.
+services:
+  - type: web
+    name: luyende-thcs
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        sync: false
