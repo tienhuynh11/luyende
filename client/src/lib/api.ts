@@ -28,6 +28,7 @@ export interface ServerConfig {
   dbEnabled: boolean;
   needsFirstTeacher: boolean;
   teacherInviteRequired: boolean;
+  teacherCodeRequiredForStudent?: boolean;
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -64,6 +65,7 @@ export function apiRegister(payload: {
   password: string;
   role: UserRole;
   grade?: GradeLevel;
+  teacherCode?: string;
   teacherInviteCode?: string;
 }): Promise<{ user: AccountPublic }> {
   return request('/api/auth/register', {

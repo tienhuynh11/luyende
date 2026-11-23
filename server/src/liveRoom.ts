@@ -15,7 +15,13 @@ interface SseClient {
   res: ServerResponse;
 }
 
-const clients = new Map<string, SseClient>();
+interface RoomInstance {
+  state: LiveRoomState;
+  clients: Map<string, SseClient>;
+}
+
+// Mỗi giáo viên có 1 phòng dạy hoàn toàn tách biệt (multi-tenant isolation)
+const rooms = new Map<string, RoomInstance>();
 
 function createPage(num: number): BoardPage {
   return {
@@ -26,23 +32,37 @@ function createPage(num: number): BoardPage {
   };
 }
 
-const state: LiveRoomState = {
-  active: false,
-  hostName: '',
-  startedAt: null,
-  examId: null,
-  questionIndex: 0,
-  showSolution: false,
-  studentCanDraw: false,
-  gridPaper: true,
-  meetUrl: '',
-  pages: [createPage(1)],
-  currentPageIndex: 0,
-  messages: [],
-  participants: [],
-};
+function getOrCreateRoom(teacherId: string): RoomInstance {
+  let room = rooms.get(teacherId);
+  if (!room) {
+    room = {
+      clients: new Map(),
+      state: {
+        active: false,
+        hostName: '',
+        startedAt: null,
+        examId: null,
+        questionIndex: 0,
+        showSolution: false,
+        studentCanDraw: false,
+        gridPaper: true,
+        meetUrl: '',
+        pages: [createPage(1)],
+        currentPageIndex: 0,
+        messages: [],
+        participants: [],
+      },
+    };
+    rooms.set(teacherId, room);
+  }
+  return room;
+}
 
-function currentPage(): BoardPage {
+export function resolveRoomTeacherId(user: AccountPublic): string | null {
+  return user.role === 'teacher' ? user.id : user.teacherId;
+}
+
+function currentPage(state: LiveRoomState): BoardPage {
   if (state.pages.length === 0) {
     state.pages = [createPage(1)];
     state.currentPageIndex = 0;
@@ -53,12 +73,12 @@ function currentPage(): BoardPage {
   return state.pages[state.currentPageIndex];
 }
 
-function syncParticipants() {
+function syncParticipants(room: RoomInstance) {
   const map = new Map<string, { id: string; name: string; role: AccountPublic['role'] }>();
-  for (const c of clients.values()) {
+  for (const c of room.clients.values()) {
     map.set(c.user.id, { id: c.user.id, name: c.user.fullName, role: c.user.role });
   }
-  state.participants = Array.from(map.values());
+  room.state.participants = Array.from(map.values());
 }
 
 function sendEvent(res: ServerResponse, event: string, data: unknown) {
@@ -69,23 +89,72 @@ function sendEvent(res: ServerResponse, event: string, data: unknown) {
   }
 }
 
-function broadcast(event: string, data: unknown, excludeUserId?: string) {
-  for (const c of clients.values()) {
+function broadcast(room: RoomInstance, event: string, data: unknown, excludeUserId?: string) {
+  for (const c of room.clients.values()) {
     if (excludeUserId && c.user.id === excludeUserId) continue;
     sendEvent(c.res, event, data);
   }
 }
 
-export function isLiveRoomActive(): { active: boolean; hostName: string; startedAt: string | null } {
-  return { active: state.active, hostName: state.hostName, startedAt: state.startedAt };
+function sanitizeStateForUser(room: RoomInstance, user: AccountPublic): LiveRoomState {
+  syncParticipants(room);
+  // Nếu phòng chưa mở, không rò rỉ nội dung bảng/tin nhắn/link gọi cho học sinh
+  if (user.role !== 'teacher' && !room.state.active) {
+    return {
+      active: false,
+      hostName: room.state.hostName,
+      startedAt: null,
+      examId: null,
+      questionIndex: 0,
+      showSolution: false,
+      studentCanDraw: false,
+      gridPaper: true,
+      meetUrl: '',
+      pages: [createPage(1)],
+      currentPageIndex: 0,
+      messages: [],
+      participants: [],
+    };
+  }
+  return room.state;
 }
 
-export function getLiveRoomState(): LiveRoomState {
-  syncParticipants();
-  return state;
+export function isLiveRoomActiveForTeacher(teacherId: string | null): {
+  active: boolean;
+  hostName: string;
+  startedAt: string | null;
+} {
+  if (!teacherId) return { active: false, hostName: '', startedAt: null };
+  const room = rooms.get(teacherId);
+  if (!room) return { active: false, hostName: '', startedAt: null };
+  return { active: room.state.active, hostName: room.state.hostName, startedAt: room.state.startedAt };
+}
+
+export function getLiveRoomStateForUser(user: AccountPublic): LiveRoomState {
+  const tid = resolveRoomTeacherId(user);
+  if (!tid) {
+    return {
+      active: false,
+      hostName: '',
+      startedAt: null,
+      examId: null,
+      questionIndex: 0,
+      showSolution: false,
+      studentCanDraw: false,
+      gridPaper: true,
+      meetUrl: '',
+      pages: [createPage(1)],
+      currentPageIndex: 0,
+      messages: [],
+      participants: [],
+    };
+  }
+  const room = getOrCreateRoom(tid);
+  return sanitizeStateForUser(room, user);
 }
 
 export function registerLiveClient(user: AccountPublic, res: ServerResponse) {
+  const tid = resolveRoomTeacherId(user);
   res.writeHead(200, {
     'content-type': 'text/event-stream; charset=utf-8',
     'cache-control': 'no-cache, no-transform',
@@ -93,12 +162,19 @@ export function registerLiveClient(user: AccountPublic, res: ServerResponse) {
     'x-accel-buffering': 'no',
   });
 
-  const cid = generateId('sse');
-  clients.set(cid, { id: cid, user, res });
-  syncParticipants();
+  if (!tid) {
+    sendEvent(res, 'state', getLiveRoomStateForUser(user));
+    res.end();
+    return;
+  }
 
-  sendEvent(res, 'state', state);
-  broadcast('participants', state.participants);
+  const room = getOrCreateRoom(tid);
+  const cid = generateId('sse');
+  room.clients.set(cid, { id: cid, user, res });
+  syncParticipants(room);
+
+  sendEvent(res, 'state', sanitizeStateForUser(room, user));
+  broadcast(room, 'participants', room.state.participants);
 
   const heartbeat = setInterval(() => {
     try {
@@ -110,9 +186,9 @@ export function registerLiveClient(user: AccountPublic, res: ServerResponse) {
 
   res.on('close', () => {
     clearInterval(heartbeat);
-    clients.delete(cid);
-    syncParticipants();
-    broadcast('participants', state.participants);
+    room.clients.delete(cid);
+    syncParticipants(room);
+    broadcast(room, 'participants', room.state.participants);
   });
 }
 
@@ -131,7 +207,19 @@ export type LiveActionPayload =
   | { type: 'delete-page'; index: number }
   | { type: 'chat'; text: string };
 
+function broadcastStatePerRole(room: RoomInstance) {
+  syncParticipants(room);
+  for (const c of room.clients.values()) {
+    sendEvent(c.res, 'state', sanitizeStateForUser(room, c.user));
+  }
+}
+
 export function applyLiveAction(user: AccountPublic, action: LiveActionPayload): { ok: boolean; error?: string } {
+  const tid = resolveRoomTeacherId(user);
+  if (!tid) return { ok: false, error: 'Tài khoản chưa được gắn với gia sư nào.' };
+  const room = getOrCreateRoom(tid);
+  const { state } = room;
+
   if (action.type === 'set-active') {
     if (user.role !== 'teacher') return { ok: false, error: 'Chỉ gia sư mới mở/đóng phòng học.' };
     state.active = Boolean(action.active);
@@ -141,7 +229,7 @@ export function applyLiveAction(user: AccountPublic, action: LiveActionPayload):
     } else {
       state.startedAt = null;
     }
-    broadcast('state', getLiveRoomState());
+    broadcastStatePerRole(room);
     return { ok: true };
   }
 
@@ -150,7 +238,7 @@ export function applyLiveAction(user: AccountPublic, action: LiveActionPayload):
     state.examId = action.examId;
     if (typeof action.questionIndex === 'number') state.questionIndex = Math.max(0, action.questionIndex);
     if (typeof action.showSolution === 'boolean') state.showSolution = action.showSolution;
-    broadcast('state', getLiveRoomState());
+    broadcastStatePerRole(room);
     return { ok: true };
   }
 
@@ -164,19 +252,19 @@ export function applyLiveAction(user: AccountPublic, action: LiveActionPayload):
         state.meetUrl = clean.slice(0, 300);
       }
     }
-    broadcast('state', getLiveRoomState());
+    broadcastStatePerRole(room);
     return { ok: true };
   }
 
   if (action.type === 'laser') {
     if (user.role !== 'teacher') return { ok: true };
-    broadcast('laser', { point: action.point, name: user.fullName }, user.id);
+    if (state.active) broadcast(room, 'laser', { point: action.point, name: user.fullName }, user.id);
     return { ok: true };
   }
 
   if (action.type === 'live-preview') {
-    if (user.role !== 'teacher' && !state.studentCanDraw) return { ok: true };
-    broadcast('preview', { pageIndex: state.currentPageIndex, item: action.item }, user.id);
+    if (user.role !== 'teacher' && (!state.active || !state.studentCanDraw)) return { ok: true };
+    if (state.active) broadcast(room, 'preview', { pageIndex: state.currentPageIndex, item: action.item }, user.id);
     return { ok: true };
   }
 
@@ -184,7 +272,7 @@ export function applyLiveAction(user: AccountPublic, action: LiveActionPayload):
     if (user.role !== 'teacher' && (!state.active || !state.studentCanDraw)) {
       return { ok: false, error: 'Phòng chưa mở hoặc gia sư đang khóa quyền viết bảng.' };
     }
-    const page = currentPage();
+    const page = currentPage(state);
     let item: WhiteboardItem;
     if (action.item.kind === 'text') {
       const text = (action.item.text ?? '').trim().slice(0, 300);
@@ -214,28 +302,35 @@ export function applyLiveAction(user: AccountPublic, action: LiveActionPayload):
 
     page.items.push(item);
     if (page.items.length > 400) page.items = page.items.slice(-400);
-    broadcast('item', { pageIndex: state.currentPageIndex, item });
+    if (state.active) {
+      broadcast(room, 'item', { pageIndex: state.currentPageIndex, item });
+    } else {
+      // Only echo to teacher clients while room is closed
+      for (const c of room.clients.values()) {
+        if (c.user.role === 'teacher') sendEvent(c.res, 'item', { pageIndex: state.currentPageIndex, item });
+      }
+    }
     return { ok: true };
   }
 
   if (action.type === 'undo-item') {
-    if (user.role !== 'teacher' && !state.studentCanDraw) {
+    if (user.role !== 'teacher' && (!state.active || !state.studentCanDraw)) {
       return { ok: false, error: 'Không có quyền hoàn tác.' };
     }
-    const page = currentPage();
+    const page = currentPage(state);
     if (page.items.length > 0) {
       page.items.pop();
-      broadcast('state', getLiveRoomState());
+      broadcastStatePerRole(room);
     }
     return { ok: true };
   }
 
   if (action.type === 'clear-page') {
     if (user.role !== 'teacher') return { ok: false, error: 'Chỉ gia sư mới xóa bảng.' };
-    const page = currentPage();
+    const page = currentPage(state);
     page.items = [];
     if (action.includeImage) page.backgroundImage = null;
-    broadcast('state', getLiveRoomState());
+    broadcastStatePerRole(room);
     return { ok: true };
   }
 
@@ -247,9 +342,9 @@ export function applyLiveAction(user: AccountPublic, action: LiveActionPayload):
     if (action.imageDataUrl && action.imageDataUrl.length > 2.2 * 1024 * 1024) {
       return { ok: false, error: 'Ảnh quá lớn, vui lòng chọn ảnh nhỏ hơn.' };
     }
-    const page = currentPage();
+    const page = currentPage(state);
     page.backgroundImage = action.imageDataUrl;
-    broadcast('state', getLiveRoomState());
+    broadcastStatePerRole(room);
     return { ok: true };
   }
 
@@ -263,7 +358,7 @@ export function applyLiveAction(user: AccountPublic, action: LiveActionPayload):
     }
     state.pages.push(page);
     state.currentPageIndex = state.pages.length - 1;
-    broadcast('state', getLiveRoomState());
+    broadcastStatePerRole(room);
     return { ok: true };
   }
 
@@ -271,7 +366,7 @@ export function applyLiveAction(user: AccountPublic, action: LiveActionPayload):
     if (user.role !== 'teacher') return { ok: false, error: 'Chỉ gia sư mới chuyển trang.' };
     const idx = Math.max(0, Math.min(state.pages.length - 1, Math.trunc(action.index)));
     state.currentPageIndex = idx;
-    broadcast('state', getLiveRoomState());
+    broadcastStatePerRole(room);
     return { ok: true };
   }
 
@@ -285,7 +380,7 @@ export function applyLiveAction(user: AccountPublic, action: LiveActionPayload):
       state.pages.splice(idx, 1);
       state.currentPageIndex = Math.min(state.currentPageIndex, state.pages.length - 1);
     }
-    broadcast('state', getLiveRoomState());
+    broadcastStatePerRole(room);
     return { ok: true };
   }
 
@@ -305,7 +400,13 @@ export function applyLiveAction(user: AccountPublic, action: LiveActionPayload):
     };
     state.messages.push(msg);
     if (state.messages.length > 100) state.messages = state.messages.slice(-100);
-    broadcast('chat', msg);
+    if (state.active) {
+      broadcast(room, 'chat', msg);
+    } else {
+      for (const c of room.clients.values()) {
+        if (c.user.role === 'teacher') sendEvent(c.res, 'chat', msg);
+      }
+    }
     return { ok: true };
   }
 

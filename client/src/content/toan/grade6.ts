@@ -586,7 +586,7 @@ const blueprints: ExamBlueprint[] = [
     const books = ['kntt', 'ctst', 'cd', 'chung'] as const;
     const book = books[idx % books.length];
     const sources = [
-      'Chuẩn cấu trúc Bộ GD&ĐT 2025–2026 (Sách Kết nối tri thức)',
+      'Chuẩn cấu trúc Bộ GD&ĐT 2025-2026 (Sách Kết nối tri thức)',
       'Đề tham khảo Phòng GD&ĐT (Sách Chân trời sáng tạo)',
       'Đề chuẩn ma trận Cuối HK1 (Sách Cánh diều)',
       'Tổng hợp chuẩn đề các trường THCS trọng điểm',
@@ -611,7 +611,7 @@ const blueprints: ExamBlueprint[] = [
     return {
       index: 9 + idx,
       title: `Đề kiểm tra Giữa Học kì 1 — Đề số ${idx + 1}`,
-      subtitle: 'Số tự nhiên, Lũy thừa, Chia hết, ƯCLN–BCNN & Hình học trực quan',
+      subtitle: 'Số tự nhiên, Lũy thừa, Chia hết, ƯCLN-BCNN & Hình học trực quan',
       category: 'giua-hk1',
       textbook: books[idx % books.length],
       durationMinutes: 60,
@@ -660,7 +660,7 @@ const blueprints: ExamBlueprint[] = [
     textbook: 'ctst',
     durationMinutes: 15,
     topics: [TOPICS.CHIA_HET],
-    sourceNote: 'Chuyên đề ƯCLN – BCNN — Toán 6',
+    sourceNote: 'Chuyên đề ƯCLN - BCNN — Toán 6',
     mcqCount: 8,
     tfCount: 0,
     saCount: 2,

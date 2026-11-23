@@ -35,14 +35,21 @@ export function generateId(prefix: string): string {
   return `${prefix}_${randomBytes(8).toString('hex')}`;
 }
 
-export function generateClassCode(grade: number): string {
+export function generateTeacherCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let suffix = '';
   const buf = randomBytes(4);
   for (let i = 0; i < 4; i++) {
     suffix += chars[buf[i] % chars.length];
   }
-  return `T${grade}-${suffix}`;
+  return `GV-${suffix}`;
+}
+
+export function safeEqualString(a: string, b: string): boolean {
+  const ba = Buffer.from(a, 'utf8');
+  const bb = Buffer.from(b, 'utf8');
+  if (ba.length !== bb.length) return false;
+  return timingSafeEqual(ba, bb);
 }
 
 export function parseCookies(req: IncomingMessage): Record<string, string> {

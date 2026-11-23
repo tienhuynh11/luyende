@@ -113,7 +113,7 @@ export function HomePage() {
         <div className="panel">
           <h1 style={{ fontSize: 22, marginBottom: 8 }}>Góc Luyện Đề</h1>
           <p className="muted-text" style={{ marginBottom: 16 }}>
-            Hệ thống giao bài tập trắc nghiệm, chữa bài chi tiết và dạy học trực tiếp cho Toán cấp 2 (Lớp 6–9).
+            Hệ thống giao bài tập trắc nghiệm, chữa bài chi tiết và dạy học trực tiếp cho Toán cấp 2 (Lớp 6-9).
             Vui lòng đăng nhập bằng tài khoản Gia sư hoặc Học sinh để bắt đầu.
           </p>
           <Link to="/dang-nhap" className="btn-primary full-width">
@@ -296,7 +296,7 @@ export function HomePage() {
         <div>
           <h1>Kho đề kiểm tra trắc nghiệm THCS</h1>
           <p className="muted-text">
-            Học kì 1 · Năm học 2026–2027 · Bám sát Kết nối tri thức, Chân trời sáng tạo, Cánh diều.
+            Học kì 1 · Năm học 2026-2027 · Bám sát Kết nối tri thức, Chân trời sáng tạo, Cánh diều.
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

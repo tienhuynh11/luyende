@@ -108,7 +108,7 @@ function createBlankExam(): Exam {
     category: 'cuoi-hk1',
     textbook: 'chung',
     term: 'HK1',
-    schoolYear: '2026–2027',
+    schoolYear: '2026-2027',
     durationMinutes: 45,
     topics: [],
     questions: [createEmptyMcq()],

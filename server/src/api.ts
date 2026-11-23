@@ -7,6 +7,7 @@ import {
   getClientIp,
   hashPassword,
   parseCookies,
+  safeEqualString,
   SESSION_COOKIE,
   setSessionCookie,
   validatePassword,
@@ -24,14 +25,16 @@ import {
   deleteStudentAccount,
   deleteTheoryNote,
   findAccountByUsername,
+  findTeacherByCode,
   getAccountBySessionToken,
   getNotificationsForUser,
+  getSingleTeacherId,
   getStudentDashboard,
   getSubmissionForStudent,
   getSubmissionForTeacher,
   getTeacherDashboard,
   isDbEnabled,
-  listStoredExams,
+  listStoredExamsForTeacher,
   listTheoryNotesForUser,
   markAllSubmissionsReviewed,
   saveSubmission,
@@ -41,8 +44,8 @@ import {
 } from './db.js';
 import {
   applyLiveAction,
-  getLiveRoomState,
-  isLiveRoomActive,
+  getLiveRoomStateForUser,
+  isLiveRoomActiveForTeacher,
   registerLiveClient,
   type LiveActionPayload,
 } from './liveRoom.js';
@@ -89,6 +92,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
         dbEnabled: dbReady,
         needsFirstTeacher: dbReady && teacherCount === 0,
         teacherInviteRequired: dbReady && (teacherCount > 0 || inviteConfigured),
+        teacherCodeRequiredForStudent: dbReady && teacherCount > 1,
       });
     }
 
@@ -99,9 +103,12 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
       return sendJson(res, 503, { error: 'Máy chủ chưa kết nối cơ sở dữ liệu Postgres (DATABASE_URL).' });
     }
 
-    // Public list of teacher-created / edited exams
+    // Teacher/student scoped custom exams (guests get empty array — no leaking private exams)
     if (path === '/api/exams' && req.method === 'GET') {
-      const rows = await listStoredExams();
+      const sess = await getCurrentUser(req);
+      if (!sess) return sendJson(res, 200, { exams: [] });
+      const tid = sess.user.role === 'teacher' ? sess.user.id : sess.user.teacherId;
+      const rows = await listStoredExamsForTeacher(tid);
       return sendJson(res, 200, { exams: rows });
     }
 
@@ -123,14 +130,14 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
         password?: string;
         role?: UserRole;
         grade?: number;
-        classCode?: string;
+        teacherCode?: string;
         teacherInviteCode?: string;
       }>(req);
 
       const username = validateUsername(body.username ?? '');
       if (!username) {
         return sendJson(res, 400, {
-          error: 'Tên đăng nhập dài 3–32 ký tự, chỉ gồm chữ thường không dấu, số, dấu chấm hoặc gạch dưới.',
+          error: 'Tên đăng nhập dài 3-32 ký tự, chỉ gồm chữ thường không dấu, số, dấu chấm hoặc gạch dưới.',
         });
       }
       const fullName = (body.fullName ?? '').trim();
@@ -146,17 +153,35 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
         ? (Number(body.grade) as GradeLevel)
         : null;
 
+      let boundTeacherId: string | null = null;
+
       if (role === 'teacher') {
         const existingTeachers = await countTeachers();
         const expectedCode = process.env.TEACHER_INVITE_CODE?.trim();
+        const provided = body.teacherInviteCode?.trim() ?? '';
         if (existingTeachers > 0) {
-          if (!expectedCode || body.teacherInviteCode?.trim() !== expectedCode) {
+          if (!expectedCode || !safeEqualString(provided, expectedCode)) {
             return sendJson(res, 403, {
               error: 'Đã có tài khoản giáo viên. Cần mã mời giáo viên hợp lệ (TEACHER_INVITE_CODE) để đăng ký thêm.',
             });
           }
-        } else if (expectedCode && body.teacherInviteCode?.trim() !== expectedCode) {
+        } else if (expectedCode && !safeEqualString(provided, expectedCode)) {
           return sendJson(res, 403, { error: 'Mã mời giáo viên không đúng.' });
+        }
+      } else {
+        const code = (body.teacherCode ?? '').trim();
+        if (code) {
+          boundTeacherId = await findTeacherByCode(code);
+          if (!boundTeacherId) {
+            return sendJson(res, 400, { error: 'Mã gia sư không tồn tại. Vui lòng kiểm tra lại.' });
+          }
+        } else {
+          const singleTid = await getSingleTeacherId();
+          const teacherCount = await countTeachers();
+          if (teacherCount > 1) {
+            return sendJson(res, 400, { error: 'Hệ thống có nhiều giáo viên, vui lòng nhập Mã gia sư.' });
+          }
+          boundTeacherId = singleTid;
         }
       }
 
@@ -166,7 +191,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
       }
 
       const passwordHash = await hashPassword(body.password!);
-      const user = await createAccount({ username, fullName, passwordHash, role, grade });
+      const user = await createAccount({ username, fullName, passwordHash, role, grade, teacherId: boundTeacherId });
 
       const token = generateSessionToken();
       await createSession(user.id, token);
@@ -219,7 +244,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
     // Notifications for logged-in user (student or teacher)
     if (path === '/api/notifications' && req.method === 'GET') {
       const items = await getNotificationsForUser(user);
-      const live = isLiveRoomActive();
+      const live = isLiveRoomActiveForTeacher(user.role === 'teacher' ? user.id : user.teacherId);
       if (live.active && user.role === 'student') {
         items.unshift({
           id: 'live-room-active',
@@ -241,7 +266,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
     }
 
     if (path === '/api/live/state' && req.method === 'GET') {
-      return sendJson(res, 200, { state: getLiveRoomState() });
+      return sendJson(res, 200, { state: getLiveRoomStateForUser(user) });
     }
 
     if (path === '/api/live/action' && req.method === 'POST') {
@@ -267,7 +292,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
 
     // Student dashboard
     if (path === '/api/student/dashboard' && req.method === 'GET') {
-      const data = await getStudentDashboard(user.id);
+      const data = await getStudentDashboard(user);
       return sendJson(res, 200, data);
     }
 
@@ -293,6 +318,8 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
       const score = Math.max(0, Math.min(10, Number(body.score ?? 0)));
       const saved = await saveSubmission({
         studentId: user.id,
+        studentRole: user.role,
+        studentTeacherId: user.teacherId,
         assignmentId: body.assignmentId ?? null,
         examId: body.examId,
         examTitle: body.examTitle,
@@ -323,7 +350,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
         const body = await readJson<{ username?: string; fullName?: string; password?: string; grade?: number }>(req);
         const username = validateUsername(body.username ?? '');
         if (!username) {
-          return sendJson(res, 400, { error: 'Tên đăng nhập dài 3–32 ký tự, chỉ gồm chữ thường không dấu, số, dấu chấm hoặc gạch dưới.' });
+          return sendJson(res, 400, { error: 'Tên đăng nhập dài 3-32 ký tự, chỉ gồm chữ thường không dấu, số, dấu chấm hoặc gạch dưới.' });
         }
         const fullName = (body.fullName ?? '').trim();
         if (fullName.length < 2 || fullName.length > 80) {
@@ -337,7 +364,14 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
 
         const grade = isValidGrade(Number(body.grade)) ? (Number(body.grade) as GradeLevel) : 6;
         const passwordHash = await hashPassword(body.password!);
-        const account = await createAccount({ username, fullName, passwordHash, role: 'student', grade });
+        const account = await createAccount({
+          username,
+          fullName,
+          passwordHash,
+          role: 'student',
+          grade,
+          teacherId: user.id,
+        });
         return sendJson(res, 201, {
           student: {
             id: account.id,
@@ -353,8 +387,8 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
 
       if (path.startsWith('/api/teacher/students/') && req.method === 'DELETE') {
         const studentId = decodeURIComponent(path.slice('/api/teacher/students/'.length));
-        const ok = await deleteStudentAccount(studentId);
-        return ok ? sendJson(res, 200, { ok: true }) : sendJson(res, 404, { error: 'Không tìm thấy học sinh.' });
+        const ok = await deleteStudentAccount(user.id, studentId);
+        return ok ? sendJson(res, 200, { ok: true }) : sendJson(res, 404, { error: 'Không tìm thấy học sinh thuộc quản lý của bạn.' });
       }
 
       if (path === '/api/teacher/assignments' && req.method === 'POST') {
@@ -392,7 +426,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
       }
 
       if (path === '/api/teacher/submissions/review-all' && req.method === 'POST') {
-        await markAllSubmissionsReviewed();
+        await markAllSubmissionsReviewed(user.id);
         return sendJson(res, 200, { ok: true });
       }
 
@@ -406,7 +440,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
           adjustedScore?: number | null;
           publishResult?: boolean;
         }>(req);
-        const updated = await saveSubmissionFeedback(subId, {
+        const updated = await saveSubmissionFeedback(user.id, subId, {
           teacherNote: body.teacherNote ?? '',
           questionNotes: body.questionNotes ?? {},
           adjustedScore:
@@ -415,7 +449,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
               : Number(body.adjustedScore),
           publishResult: Boolean(body.publishResult),
         });
-        if (!updated) return sendJson(res, 404, { error: 'Không tìm thấy bài làm.' });
+        if (!updated) return sendJson(res, 404, { error: 'Không tìm thấy bài làm thuộc học sinh của bạn.' });
         return sendJson(res, 200, { submission: updated });
       }
 
@@ -432,7 +466,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
         }>(req, 3 * 1024 * 1024);
 
         if (!body.title?.trim() || !isValidGrade(Number(body.grade))) {
-          return sendJson(res, 400, { error: 'Bài lý thuyết cần có tiêu đề và khối lớp (6–9).' });
+          return sendJson(res, 400, { error: 'Bài lý thuyết cần có tiêu đề và khối lớp (6-9).' });
         }
         const note = await upsertTheoryNote(user.id, {
           id: body.id,
@@ -455,8 +489,8 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
 
       if (path.startsWith('/api/teacher/submissions/') && req.method === 'GET') {
         const subId = decodeURIComponent(path.slice('/api/teacher/submissions/'.length));
-        const submission = await getSubmissionForTeacher(subId);
-        if (!submission) return sendJson(res, 404, { error: 'Không tìm thấy bài làm.' });
+        const submission = await getSubmissionForTeacher(user.id, subId);
+        if (!submission) return sendJson(res, 404, { error: 'Không tìm thấy bài làm thuộc học sinh của bạn.' });
         return sendJson(res, 200, { submission });
       }
 
@@ -464,7 +498,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
         const body = await readJson<{ exam?: Exam }>(req);
         const exam = body.exam;
         if (!exam || !exam.title?.trim() || !isValidGrade(Number(exam.grade)) || !Array.isArray(exam.questions) || exam.questions.length === 0) {
-          return sendJson(res, 400, { error: 'Đề kiểm tra cần có tiêu đề, khối lớp (6–9) và ít nhất 1 câu hỏi.' });
+          return sendJson(res, 400, { error: 'Đề kiểm tra cần có tiêu đề, khối lớp (6-9) và ít nhất 1 câu hỏi.' });
         }
         const saved = await upsertStoredExam(user.id, {
           ...exam,

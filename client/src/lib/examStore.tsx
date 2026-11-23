@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import type { Exam, GradeLevel, SubjectId } from '@shared/types';
 import { getAllExams as getBuiltInExams } from '../content';
 import { fetchStoredExams, type StoredExamDto } from './api';
+import { useAuth } from './authContext';
 
 interface ExamStoreValue {
   allExams: Exam[];
@@ -26,6 +27,7 @@ const ExamStoreContext = createContext<ExamStoreValue>({
 });
 
 export function ExamProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
   const builtIn = useMemo(() => getBuiltInExams(), []);
   const builtInIds = useMemo(() => new Set(builtIn.map((e) => e.id)), [builtIn]);
 
@@ -37,7 +39,7 @@ export function ExamProvider({ children }: { children: ReactNode }) {
       const { exams } = await fetchStoredExams();
       setStoredRows(exams);
     } catch {
-      // Fallback gracefully to built-in exams
+      setStoredRows([]);
     } finally {
       setLoading(false);
     }
@@ -45,7 +47,7 @@ export function ExamProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void reloadExams();
-  }, [reloadExams]);
+  }, [reloadExams, user?.id]);
 
   const { allExams, overriddenIds, customIds } = useMemo(() => {
     const storedMap = new Map<string, StoredExamDto>();

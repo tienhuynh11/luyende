@@ -16,7 +16,7 @@ import {
 } from '@shared/types';
 import { QuestionCard } from '../components/QuestionCard';
 import { generateCustomMathExam } from '../content';
-import { apiSaveSubmission } from '../lib/api';
+import { apiSaveSubmission, fetchStudentDashboard } from '../lib/api';
 import { useAuth } from '../lib/authContext';
 import { useExams } from '../lib/examStore';
 import { clearDraft, loadDraft, recordAttempt, saveDraft } from '../lib/storage';
@@ -72,6 +72,23 @@ export function ExamPage() {
   const [reviewFilter, setReviewFilter] = useState<'all' | 'wrong'>('all');
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [accessState, setAccessState] = useState<'checking' | 'allowed' | 'denied'>('checking');
+
+  // Chống bypass URL trực tiếp: học sinh chỉ được mở đề gia sư đã giao cho mình
+  useEffect(() => {
+    if (!exam) return;
+    if (!user || user.role !== 'student') {
+      setAccessState('allowed');
+      return;
+    }
+    setAccessState('checking');
+    fetchStudentDashboard()
+      .then((d) => {
+        const ok = d.assignments.some((a) => a.examId === exam.id);
+        setAccessState(ok ? 'allowed' : 'denied');
+      })
+      .catch(() => setAccessState('denied'));
+  }, [exam, user]);
 
   useEffect(() => {
     if (!exam || submitted || mode !== 'exam') return;
@@ -122,7 +139,31 @@ export function ExamPage() {
         <div className="panel empty-inline">
           <p>Không tìm thấy đề kiểm tra này.</p>
           <button type="button" className="btn-primary" onClick={() => navigate('/')}>
-            Quay lại kho đề
+            Quay lại
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (user?.role === 'student' && accessState === 'checking') {
+    return (
+      <div className="container">
+        <div className="panel empty-inline">Đang kiểm tra quyền truy cập đề...</div>
+      </div>
+    );
+  }
+
+  if (user?.role === 'student' && accessState === 'denied') {
+    return (
+      <div className="container narrow-container" style={{ marginTop: 24 }}>
+        <div className="panel" style={{ textAlign: 'center' }}>
+          <h2 style={{ marginBottom: 8 }}>Chưa được phép làm đề này</h2>
+          <p className="muted-text" style={{ marginBottom: 14 }}>
+            Đề kiểm tra này chưa được gia sư giao cho bạn.
+          </p>
+          <button type="button" className="btn-primary btn-sm" onClick={() => navigate('/')}>
+            Về bài tập được giao
           </button>
         </div>
       </div>

@@ -586,9 +586,16 @@ export function TeacherPage() {
       {!loading && activeTab === 'students' && (
         <div className="stack-gap">
           <section className="panel">
-            <h2>Tạo nhanh tài khoản cho học sinh</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+              <h2 style={{ margin: 0 }}>Tạo nhanh tài khoản cho học sinh</h2>
+              {user.teacherCode && (
+                <div className="info-note" style={{ padding: '5px 10px' }}>
+                  Mã gia sư của bạn: <strong>{user.teacherCode}</strong>
+                </div>
+              )}
+            </div>
             <p className="muted-text" style={{ marginBottom: 12 }}>
-              Bạn có thể tạo sẵn tài khoản ở đây rồi gửi tên đăng nhập & mật khẩu cho học sinh (hoặc để học sinh tự đăng ký).
+              Học sinh tạo ở đây (hoặc tự đăng ký bằng Mã gia sư của bạn) sẽ chỉ thuộc quyền quản lý của riêng bạn.
             </p>
             <form onSubmit={handleCreateStudent} className="assign-form">
               <div className="field-row">

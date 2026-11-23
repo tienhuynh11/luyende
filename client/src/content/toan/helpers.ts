@@ -199,7 +199,7 @@ export function buildGradeExams(config: GradeGeneratorConfig): Exam[] {
       category: bp.category,
       textbook: bp.textbook,
       term: 'HK1',
-      schoolYear: '2026–2027',
+      schoolYear: '2026-2027',
       durationMinutes: bp.durationMinutes,
       topics: bp.topics,
       questions,

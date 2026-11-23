@@ -14,6 +14,7 @@ export function LoginPage() {
   const [fullName, setFullName] = useState('');
   const [password, setPassword] = useState('');
   const [grade, setGrade] = useState<GradeLevel>(6);
+  const [teacherCode, setTeacherCode] = useState('');
   const [teacherInviteCode, setTeacherInviteCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -34,6 +35,7 @@ export function LoginPage() {
           password,
           role,
           grade: role === 'student' ? grade : undefined,
+          teacherCode: role === 'student' ? teacherCode : undefined,
           teacherInviteCode: role === 'teacher' ? teacherInviteCode : undefined,
         });
         setUser(user);
@@ -152,18 +154,33 @@ export function LoginPage() {
           </div>
 
           {tab === 'register' && role === 'student' && (
-            <div className="field">
-              <label htmlFor="grade">Khối lớp đang học</label>
-              <select
-                id="grade"
-                value={grade}
-                onChange={(e) => setGrade(Number(e.target.value) as GradeLevel)}
-              >
-                <option value={6}>Lớp 6</option>
-                <option value={7}>Lớp 7</option>
-                <option value={8}>Lớp 8</option>
-                <option value={9}>Lớp 9</option>
-              </select>
+            <div className="field-row">
+              <div className="field">
+                <label htmlFor="grade">Khối lớp đang học</label>
+                <select
+                  id="grade"
+                  value={grade}
+                  onChange={(e) => setGrade(Number(e.target.value) as GradeLevel)}
+                >
+                  <option value={6}>Lớp 6</option>
+                  <option value={7}>Lớp 7</option>
+                  <option value={8}>Lớp 8</option>
+                  <option value={9}>Lớp 9</option>
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="teacherCode">
+                  Mã gia sư {config.teacherCodeRequiredForStudent ? '(bắt buộc)' : '(tùy chọn)'}
+                </label>
+                <input
+                  id="teacherCode"
+                  type="text"
+                  required={Boolean(config.teacherCodeRequiredForStudent)}
+                  placeholder="Ví dụ: GV-AB12"
+                  value={teacherCode}
+                  onChange={(e) => setTeacherCode(e.target.value)}
+                />
+              </div>
             </div>
           )}
 

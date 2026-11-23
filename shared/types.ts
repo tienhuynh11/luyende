@@ -16,6 +16,8 @@ export interface AccountPublic {
   fullName: string;
   role: UserRole;
   grade: GradeLevel | null;
+  teacherId: string | null;
+  teacherCode: string | null;
   createdAt: string;
 }
 

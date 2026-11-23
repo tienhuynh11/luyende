@@ -15,7 +15,7 @@ Web luyện đề kiểm tra trắc nghiệm cấp 2 (Lớp 6, 7, 8, 9) theo **C
 1. **Giáo viên**: Vào `/dang-nhap` → tab **Đăng ký tài khoản** → chọn vai trò **Giáo viên** để tạo tài khoản đầu tiên.
 2. Vào mục **Quản lý lớp** (`/giao-vien`):
    - Tạo lớp (vd `8A1`, Khối 8) → hệ thống cấp **Mã lớp** (vd `T8-AB12`).
-   - Chọn **Giao đề** cho lớp (từ 96 đề Toán 6–9) kèm hạn nộp & dặn dò.
+   - Chọn **Giao đề** cho lớp (từ 96 đề Toán 6-9) kèm hạn nộp & dặn dò.
    - Xem kết quả nộp bài của học sinh, bấm **Xem bài** để kiểm tra từng câu, hoặc bấm **Xuất Excel (CSV)**.
 3. **Học sinh**: Đăng ký tài khoản **Học sinh** và nhập **Mã lớp** giáo viên gửi → đề giáo viên giao hiện ngay trên trang chủ. Nộp bài xong học sinh thấy điểm + lời giải chi tiết, còn giáo viên thấy ngay kết quả trong bảng điểm.
 
