@@ -1,4 +1,4 @@
-# LuyệnĐề THCS — một image phục vụ cả giao diện (client/dist) lẫn API (server).
+# Góc Luyện Đề — một image phục vụ cả giao diện (client/dist) lẫn API (server).
 FROM node:22-slim AS client
 WORKDIR /app
 COPY client/package*.json client/

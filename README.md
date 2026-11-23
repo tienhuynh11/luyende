@@ -1,4 +1,4 @@
-# LuyệnĐề THCS
+# Góc Luyện Đề
 
 Web luyện đề kiểm tra trắc nghiệm cấp 2 (Lớp 6, 7, 8, 9) theo **Chương trình GDPT 2018**, có hệ thống tài khoản **Giáo viên** (tạo lớp, giao đề, xem bài làm & xuất điểm Excel) và **Học sinh** (tham gia lớp bằng mã, làm bài, xem điểm & lời giải chi tiết).
 

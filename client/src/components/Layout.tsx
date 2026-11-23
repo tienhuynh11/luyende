@@ -61,7 +61,7 @@ export function Layout({ theme, onToggleTheme, children }: LayoutProps) {
           <Link to="/" className="brand">
             <span className="brand-mark">T</span>
             <span className="brand-text">
-              <strong>LuyệnĐề THCS</strong>
+              <strong>Góc Luyện Đề</strong>
               <small className="hide-xs">Chương trình GDPT 2018</small>
             </span>
           </Link>
@@ -180,7 +180,7 @@ export function Layout({ theme, onToggleTheme, children }: LayoutProps) {
 
       <footer className="footer">
         <div className="footer-inner">
-          <span>LuyệnĐề THCS · Toán 6, 7, 8, 9 (Kết nối tri thức · Chân trời sáng tạo · Cánh diều)</span>
+          <span>Góc Luyện Đề · Toán 6, 7, 8, 9 (Kết nối tri thức · Chân trời sáng tạo · Cánh diều)</span>
           <span>Trắc nghiệm tự động chấm điểm kèm lời giải chi tiết</span>
         </div>
       </footer>

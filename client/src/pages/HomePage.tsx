@@ -111,7 +111,7 @@ export function HomePage() {
     return (
       <div className="container narrow-container" style={{ marginTop: 24 }}>
         <div className="panel">
-          <h1 style={{ fontSize: 22, marginBottom: 8 }}>LuyệnĐề THCS</h1>
+          <h1 style={{ fontSize: 22, marginBottom: 8 }}>Góc Luyện Đề</h1>
           <p className="muted-text" style={{ marginBottom: 16 }}>
             Hệ thống giao bài tập trắc nghiệm, chữa bài chi tiết và dạy học trực tiếp cho Toán cấp 2 (Lớp 6–9).
             Vui lòng đăng nhập bằng tài khoản Gia sư hoặc Học sinh để bắt đầu.
