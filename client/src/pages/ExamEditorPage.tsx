@@ -312,7 +312,7 @@ export function ExamEditorPage() {
           )}
           {examId && (
             <button type="button" className="btn-secondary btn-sm" disabled={saving} onClick={handleDeleteOrHide}>
-              <Trash2 size={15} /> {editingBuiltIn ? 'Ẩn đề' : 'Xóa đề'}
+              <Trash2 size={15} /> Xóa đề
             </button>
           )}
           <button type="button" className="btn-primary btn-sm" disabled={saving} onClick={handleSave}>

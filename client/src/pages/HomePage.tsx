@@ -1,4 +1,4 @@
-import { Clock, Search } from 'lucide-react';
+import { Clock, Search, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -11,7 +11,7 @@ import {
   type TextbookSeries,
 } from '@shared/types';
 import { SUBJECTS } from '../content';
-import { fetchStudentDashboard } from '../lib/api';
+import { apiDeleteOrHideExam, fetchStudentDashboard } from '../lib/api';
 import { useAuth } from '../lib/authContext';
 import { useExams } from '../lib/examStore';
 import { loadDraft, loadProgress } from '../lib/storage';
@@ -28,7 +28,7 @@ const CATEGORIES: Array<{ id: 'all' | ExamCategory; label: string }> = [
 export function HomePage() {
   const navigate = useNavigate();
   const { user, config, notifications } = useAuth();
-  const { allExams, getExamsBySubjectGrade, isCustom, isOverridden } = useExams();
+  const { allExams, getExamsBySubjectGrade, isBuiltIn, isCustom, isOverridden, reloadExams } = useExams();
 
   const [subjectId, setSubjectId] = useState<SubjectId>('toan');
   const [grade, setGrade] = useState<GradeLevel>(() => {
@@ -91,6 +91,16 @@ export function HomePage() {
   const handleRandomExam = () => {
     const seed = Math.floor(Date.now() % 1000000);
     navigate(`/de/random/${grade}/${seed}?mode=exam`);
+  };
+
+  const handleDeleteExam = async (examId: string, title: string) => {
+    if (!window.confirm(`Xóa đề "${title}" khỏi kho đề?`)) return;
+    try {
+      await apiDeleteOrHideExam(examId, isBuiltIn(examId) ? 'hide' : 'delete');
+      await reloadExams();
+    } catch (err) {
+      alert((err as Error).message);
+    }
   };
 
   const liveNotif = notifications.find((n) => n.kind === 'live-class');
@@ -386,11 +396,25 @@ export function HomePage() {
               const draft = loadDraft(exam.id);
               return (
                 <article key={exam.id} className="exam-card">
-                  <div className="exam-card-top">
-                    <span className={`cat-badge cat-${exam.category}`}>{CATEGORY_LABELS[exam.category]}</span>
-                    <span className="book-badge">{TEXTBOOK_LABELS[exam.textbook]}</span>
-                    {(isCustom(exam.id) || isOverridden(exam.id)) && (
-                      <span className="tag">{isCustom(exam.id) ? 'GV tạo' : 'Đã sửa'}</span>
+                  <div className="exam-card-top" style={{ justifyContent: 'space-between' }}>
+                    <div className="exam-badges">
+                      <span className={`cat-badge cat-${exam.category}`}>{CATEGORY_LABELS[exam.category]}</span>
+                      <span className="book-badge">{TEXTBOOK_LABELS[exam.textbook]}</span>
+                      {(isCustom(exam.id) || isOverridden(exam.id)) && (
+                        <span className="tag">{isCustom(exam.id) ? 'GV tạo' : 'Đã sửa'}</span>
+                      )}
+                    </div>
+                    {user?.role === 'teacher' && (
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        style={{ width: 30, height: 30 }}
+                        title="Xóa đề này"
+                        aria-label="Xóa đề này"
+                        onClick={() => void handleDeleteExam(exam.id, exam.title)}
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     )}
                   </div>
 
