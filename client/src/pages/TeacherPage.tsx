@@ -1,21 +1,20 @@
-import { Copy, Download, Eye, Plus, Trash2, X } from 'lucide-react';
+import { Download, Eye, Plus, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { gradeExam } from '@shared/scoring';
 import {
   CATEGORY_LABELS,
   type AssignmentInfo,
-  type ClassMemberInfo,
-  type ClassroomInfo,
   type GradeLevel,
+  type StudentSummary,
   type SubmissionRecord,
 } from '@shared/types';
 import { QuestionCard } from '../components/QuestionCard';
 import {
   apiCreateAssignment,
-  apiCreateClass,
+  apiCreateStudent,
   apiDeleteAssignment,
-  apiDeleteClass,
+  apiDeleteStudent,
   fetchSubmissionDetail,
   fetchTeacherDashboard,
 } from '../lib/api';
@@ -37,34 +36,35 @@ export function TeacherPage() {
   const preselectExamId = searchParams.get('assign') ?? '';
   const preselectExam = preselectExamId ? getExam(preselectExamId) : undefined;
 
-  const [activeTab, setActiveTab] = useState<'results' | 'assignments' | 'classes'>(
+  const [activeTab, setActiveTab] = useState<'results' | 'assignments' | 'students'>(
     preselectExam ? 'assignments' : 'results',
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [classes, setClasses] = useState<ClassroomInfo[]>([]);
-  const [membersByClass, setMembersByClass] = useState<Record<string, ClassMemberInfo[]>>({});
+  const [students, setStudents] = useState<StudentSummary[]>([]);
   const [assignments, setAssignments] = useState<AssignmentInfo[]>([]);
   const [submissions, setSubmissions] = useState<SubmissionRecord[]>([]);
 
-  // Form: tạo lớp mới
-  const [newClassName, setNewClassName] = useState('');
-  const [newClassGrade, setNewClassGrade] = useState<GradeLevel>(6);
-  const [copiedCode, setCopiedCode] = useState<string | null>(null);
-
-  // Form: giao đề mới
-  const [assignClassId, setAssignClassId] = useState('');
+  // Form: giao đề trực tiếp cho học sinh
+  const [assignStudentId, setAssignStudentId] = useState<string>('all');
   const [assignGrade, setAssignGrade] = useState<GradeLevel>(preselectExam?.grade ?? 6);
   const [assignExamId, setAssignExamId] = useState(preselectExam?.id ?? '');
   const [assignDue, setAssignDue] = useState('');
   const [assignNote, setAssignNote] = useState('');
 
+  // Form: tạo nhanh tài khoản học sinh
+  const [stuFullName, setStuFullName] = useState('');
+  const [stuUsername, setStuUsername] = useState('');
+  const [stuPassword, setStuPassword] = useState('');
+  const [stuGrade, setStuGrade] = useState<GradeLevel>(6);
+  const [stuMsg, setStuMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
   // Bộ lọc bảng điểm
-  const [filterClassId, setFilterClassId] = useState('all');
+  const [filterStudentId, setFilterStudentId] = useState('all');
   const [filterExamId, setFilterExamId] = useState('all');
 
-  // Xem chi tiết bài làm của học sinh
+  // Xem chi tiết bài làm
   const [inspectSub, setInspectSub] = useState<SubmissionRecord | null>(null);
   const [inspectLoading, setInspectLoading] = useState(false);
 
@@ -73,19 +73,15 @@ export function TeacherPage() {
     setError(null);
     try {
       const data = await fetchTeacherDashboard();
-      setClasses(data.classes);
-      setMembersByClass(data.membersByClass);
+      setStudents(data.students);
       setAssignments(data.assignments);
       setSubmissions(data.submissions);
-      if (data.classes.length > 0 && !assignClassId) {
-        setAssignClassId(data.classes[0].id);
-      }
     } catch (err) {
       setError((err as Error).message || 'Không tải được dữ liệu.');
     } finally {
       setLoading(false);
     }
-  }, [assignClassId]);
+  }, []);
 
   useEffect(() => {
     if (!authLoading && user?.role === 'teacher') {
@@ -106,11 +102,11 @@ export function TeacherPage() {
 
   const filteredSubmissions = useMemo(() => {
     return submissions.filter((s) => {
-      if (filterClassId !== 'all' && s.classId !== filterClassId) return false;
+      if (filterStudentId !== 'all' && s.studentId !== filterStudentId) return false;
       if (filterExamId !== 'all' && s.examId !== filterExamId) return false;
       return true;
     });
-  }, [submissions, filterClassId, filterExamId]);
+  }, [submissions, filterStudentId, filterExamId]);
 
   const distinctExamsInSubmissions = useMemo(() => {
     const map = new Map<string, string>();
@@ -127,7 +123,7 @@ export function TeacherPage() {
       <div className="container narrow-container">
         <div className="panel">
           <h1>Khu vực dành cho giáo viên</h1>
-          <p className="muted-text">Vui lòng đăng nhập bằng tài khoản giáo viên để tạo lớp, giao đề và xem điểm học sinh.</p>
+          <p className="muted-text">Vui lòng đăng nhập bằng tài khoản giáo viên để giao đề và xem điểm học sinh.</p>
           <button type="button" className="btn-primary" onClick={() => navigate('/dang-nhap')}>
             Đăng nhập
           </button>
@@ -136,37 +132,13 @@ export function TeacherPage() {
     );
   }
 
-  const handleCreateClass = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!newClassName.trim()) return;
-    try {
-      const { classroom } = await apiCreateClass(newClassName.trim(), newClassGrade);
-      setNewClassName('');
-      setClasses((prev) => [classroom, ...prev]);
-      if (!assignClassId) setAssignClassId(classroom.id);
-    } catch (err) {
-      alert((err as Error).message);
-    }
-  };
-
-  const handleDeleteClass = async (classId: string, name: string) => {
-    if (!window.confirm(`Xóa lớp "${name}" cùng danh sách giao đề của lớp này?`)) return;
-    try {
-      await apiDeleteClass(classId);
-      setClasses((prev) => prev.filter((c) => c.id !== classId));
-      setAssignments((prev) => prev.filter((a) => a.classId !== classId));
-    } catch (err) {
-      alert((err as Error).message);
-    }
-  };
-
   const handleCreateAssignment = async (e: FormEvent) => {
     e.preventDefault();
     const exam = getExam(assignExamId);
-    if (!assignClassId || !exam) return;
+    if (!exam) return;
     try {
       const { assignment } = await apiCreateAssignment({
-        classId: assignClassId,
+        studentId: assignStudentId === 'all' ? null : assignStudentId,
         examId: exam.id,
         examTitle: exam.title,
         grade: exam.grade,
@@ -191,6 +163,40 @@ export function TeacherPage() {
     }
   };
 
+  const handleCreateStudent = async (e: FormEvent) => {
+    e.preventDefault();
+    setStuMsg(null);
+    try {
+      const { student } = await apiCreateStudent({
+        fullName: stuFullName,
+        username: stuUsername,
+        password: stuPassword,
+        grade: stuGrade,
+      });
+      setStudents((prev) => [student, ...prev]);
+      setStuMsg({
+        type: 'ok',
+        text: `Đã tạo tài khoản cho ${student.fullName} (tên đăng nhập: ${student.username}).`,
+      });
+      setStuFullName('');
+      setStuUsername('');
+      setStuPassword('');
+    } catch (err) {
+      setStuMsg({ type: 'err', text: (err as Error).message });
+    }
+  };
+
+  const handleDeleteStudent = async (id: string, name: string) => {
+    if (!window.confirm(`Xóa tài khoản học sinh "${name}" và toàn bộ bài nộp của em này?`)) return;
+    try {
+      await apiDeleteStudent(id);
+      setStudents((prev) => prev.filter((s) => s.id !== id));
+      setSubmissions((prev) => prev.filter((s) => s.studentId !== id));
+    } catch (err) {
+      alert((err as Error).message);
+    }
+  };
+
   const handleInspect = async (subId: string) => {
     setInspectLoading(true);
     try {
@@ -204,11 +210,10 @@ export function TeacherPage() {
   };
 
   const handleExportCsv = () => {
-    const header = ['Học sinh', 'Tài khoản', 'Lớp', 'Đề kiểm tra', 'Điểm', 'Số câu đúng', 'Thời gian (giây)', 'Thời điểm nộp'];
+    const header = ['Học sinh', 'Tài khoản', 'Đề kiểm tra', 'Điểm', 'Số câu đúng', 'Thời gian (giây)', 'Thời điểm nộp'];
     const rows = filteredSubmissions.map((s) => [
       s.studentName,
       s.studentUsername,
-      s.className ?? '',
       s.examTitle,
       s.score.toFixed(2),
       `${s.correctCount}/${s.totalQuestions}`,
@@ -232,8 +237,10 @@ export function TeacherPage() {
     <div className="container">
       <div className="page-head">
         <div>
-          <h1>Quản lý lớp học & Giao đề</h1>
-          <p className="muted-text">Giáo viên: {user.fullName} · {classes.length} lớp · {assignments.length} đề đang giao</p>
+          <h1>Giao bài & Theo dõi học sinh</h1>
+          <p className="muted-text">
+            {students.length} học sinh · {assignments.length} đề đã giao · {submissions.length} lượt nộp bài
+          </p>
         </div>
         <div className="tab-strip">
           <button
@@ -241,7 +248,7 @@ export function TeacherPage() {
             className={`tab-btn ${activeTab === 'results' ? 'active' : ''}`}
             onClick={() => setActiveTab('results')}
           >
-            Kết quả học sinh ({submissions.length})
+            Kết quả ({submissions.length})
           </button>
           <button
             type="button"
@@ -252,10 +259,10 @@ export function TeacherPage() {
           </button>
           <button
             type="button"
-            className={`tab-btn ${activeTab === 'classes' ? 'active' : ''}`}
-            onClick={() => setActiveTab('classes')}
+            className={`tab-btn ${activeTab === 'students' ? 'active' : ''}`}
+            onClick={() => setActiveTab('students')}
           >
-            Lớp học ({classes.length})
+            Học sinh ({students.length})
           </button>
           <button
             type="button"
@@ -270,15 +277,21 @@ export function TeacherPage() {
       {error && <div className="form-error">{error}</div>}
       {loading && <div className="panel">Đang tải dữ liệu...</div>}
 
-      {/* TAB 1: KẾT QUẢ HỌC SINH */}
+      {/* TAB 1: KẾT QUẢ LÀM BÀI */}
       {!loading && activeTab === 'results' && (
         <section className="panel">
           <div className="toolbar-row">
             <div className="toolbar-filters">
-              <select className="select-input" value={filterClassId} onChange={(e) => setFilterClassId(e.target.value)}>
-                <option value="all">Tất cả lớp</option>
-                {classes.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name} (Lớp {c.grade})</option>
+              <select
+                className="select-input"
+                value={filterStudentId}
+                onChange={(e) => setFilterStudentId(e.target.value)}
+              >
+                <option value="all">Tất cả học sinh</option>
+                {students.map((st) => (
+                  <option key={st.id} value={st.id}>
+                    {st.fullName} {st.grade ? `(Lớp ${st.grade})` : ''}
+                  </option>
                 ))}
               </select>
               <select className="select-input" value={filterExamId} onChange={(e) => setFilterExamId(e.target.value)}>
@@ -297,7 +310,7 @@ export function TeacherPage() {
 
           {filteredSubmissions.length === 0 ? (
             <div className="empty-inline">
-              Chưa có bài nộp nào từ học sinh. Hãy tạo lớp ở tab <strong>Lớp học</strong>, gửi mã lớp cho học sinh và giao đề ở tab <strong>Giao đề</strong>.
+              Chưa có bài nộp nào. Bạn có thể tạo tài khoản cho học sinh ở tab <strong>Học sinh</strong> rồi giao đề ở tab <strong>Giao đề</strong>.
             </div>
           ) : (
             <div className="table-wrap">
@@ -305,7 +318,6 @@ export function TeacherPage() {
                 <thead>
                   <tr>
                     <th>Học sinh</th>
-                    <th>Lớp</th>
                     <th>Đề kiểm tra</th>
                     <th>Điểm</th>
                     <th>Đúng</th>
@@ -321,7 +333,6 @@ export function TeacherPage() {
                         <strong>{s.studentName}</strong>
                         <div className="cell-sub">{s.studentUsername}</div>
                       </td>
-                      <td>{s.className ?? '—'}</td>
                       <td>
                         <div>{s.examTitle}</div>
                         <div className="cell-sub">Toán {s.grade} · {CATEGORY_LABELS[s.category]}</div>
@@ -353,84 +364,80 @@ export function TeacherPage() {
         </section>
       )}
 
-      {/* TAB 2: GIAO ĐỀ */}
+      {/* TAB 2: GIAO ĐỀ TRỰC TIẾP */}
       {!loading && activeTab === 'assignments' && (
         <div className="stack-gap">
           <section className="panel">
-            <h2>Giao đề mới cho lớp</h2>
-            {classes.length === 0 ? (
-              <p className="muted-text">
-                Bạn chưa có lớp nào. Hãy chuyển sang tab{' '}
-                <button type="button" className="link-btn" onClick={() => setActiveTab('classes')}>Lớp học</button> để tạo lớp trước.
-              </p>
-            ) : (
-              <form onSubmit={handleCreateAssignment} className="assign-form">
-                <div className="field-row">
-                  <div className="field">
-                    <label>Chọn lớp</label>
-                    <select
-                      value={assignClassId}
-                      onChange={(e) => {
-                        const cid = e.target.value;
-                        setAssignClassId(cid);
-                        const cls = classes.find((c) => c.id === cid);
-                        if (cls) setAssignGrade(cls.grade);
-                      }}
-                    >
-                      {classes.map((c) => (
-                        <option key={c.id} value={c.id}>{c.name} (Khối {c.grade} · {c.studentCount} HS)</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="field">
-                    <label>Khối đề Toán</label>
-                    <select value={assignGrade} onChange={(e) => setAssignGrade(Number(e.target.value) as GradeLevel)}>
-                      <option value={6}>Toán Lớp 6</option>
-                      <option value={7}>Toán Lớp 7</option>
-                      <option value={8}>Toán Lớp 8</option>
-                      <option value={9}>Toán Lớp 9</option>
-                    </select>
-                  </div>
-                </div>
-
+            <h2>Giao đề cho học sinh</h2>
+            <form onSubmit={handleCreateAssignment} className="assign-form">
+              <div className="field-row">
                 <div className="field">
-                  <label>Chọn đề kiểm tra</label>
-                  <select value={assignExamId} onChange={(e) => setAssignExamId(e.target.value)}>
-                    {gradeExams.map((ex) => (
-                      <option key={ex.id} value={ex.id}>
-                        [{CATEGORY_LABELS[ex.category]}] {ex.title} ({ex.durationMinutes} phút)
+                  <label>Giao cho</label>
+                  <select
+                    value={assignStudentId}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setAssignStudentId(val);
+                      const found = students.find((st) => st.id === val);
+                      if (found?.grade) setAssignGrade(found.grade);
+                    }}
+                  >
+                    <option value="all">Tất cả học sinh</option>
+                    {students.map((st) => (
+                      <option key={st.id} value={st.id}>
+                        {st.fullName} {st.grade ? `(Lớp ${st.grade})` : ''}
                       </option>
                     ))}
                   </select>
                 </div>
-
-                <div className="field-row">
-                  <div className="field">
-                    <label>Hạn nộp (tùy chọn)</label>
-                    <input type="datetime-local" value={assignDue} onChange={(e) => setAssignDue(e.target.value)} />
-                  </div>
-                  <div className="field">
-                    <label>Dặn dò học sinh (tùy chọn)</label>
-                    <input
-                      type="text"
-                      placeholder="Ví dụ: Làm nghiêm túc, nộp trước tối Thứ 6"
-                      value={assignNote}
-                      onChange={(e) => setAssignNote(e.target.value)}
-                    />
-                  </div>
+                <div className="field">
+                  <label>Khối đề</label>
+                  <select value={assignGrade} onChange={(e) => setAssignGrade(Number(e.target.value) as GradeLevel)}>
+                    <option value={6}>Lớp 6</option>
+                    <option value={7}>Lớp 7</option>
+                    <option value={8}>Lớp 8</option>
+                    <option value={9}>Lớp 9</option>
+                  </select>
                 </div>
+              </div>
 
-                <div>
-                  <button type="submit" className="btn-primary">
-                    <Plus size={16} /> Giao đề cho lớp
-                  </button>
+              <div className="field">
+                <label>Chọn đề kiểm tra</label>
+                <select value={assignExamId} onChange={(e) => setAssignExamId(e.target.value)}>
+                  {gradeExams.map((ex) => (
+                    <option key={ex.id} value={ex.id}>
+                      [{CATEGORY_LABELS[ex.category]}] {ex.title} ({ex.durationMinutes} phút)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="field-row">
+                <div className="field">
+                  <label>Hạn nộp (tùy chọn)</label>
+                  <input type="datetime-local" value={assignDue} onChange={(e) => setAssignDue(e.target.value)} />
                 </div>
-              </form>
-            )}
+                <div className="field">
+                  <label>Dặn dò (tùy chọn)</label>
+                  <input
+                    type="text"
+                    placeholder="Ví dụ: Làm xong trước buổi học Thứ 5"
+                    value={assignNote}
+                    onChange={(e) => setAssignNote(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <button type="submit" className="btn-primary">
+                  <Plus size={16} /> Giao đề
+                </button>
+              </div>
+            </form>
           </section>
 
           <section className="panel">
-            <h2>Danh sách đề đã giao</h2>
+            <h2>Đề đã giao</h2>
             {assignments.length === 0 ? (
               <div className="empty-inline">Chưa có đề nào được giao.</div>
             ) : (
@@ -438,42 +445,41 @@ export function TeacherPage() {
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th>Lớp</th>
+                      <th>Người nhận</th>
                       <th>Đề kiểm tra</th>
                       <th>Hạn nộp</th>
-                      <th>Đã nộp</th>
+                      <th>Trạng thái</th>
                       <th></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {assignments.map((a) => {
-                      const cls = classes.find((c) => c.id === a.classId);
-                      return (
-                        <tr key={a.id}>
-                          <td><strong>{a.className}</strong></td>
-                          <td>
-                            <div>{a.examTitle}</div>
-                            {a.note && <div className="cell-sub">{a.note}</div>}
-                          </td>
-                          <td className="cell-nowrap">
-                            {a.dueAt ? new Date(a.dueAt).toLocaleString('vi-VN') : 'Không giới hạn'}
-                          </td>
-                          <td>
-                            {a.submissionCount ?? 0}/{cls?.studentCount ?? 0} HS
-                          </td>
-                          <td>
-                            <button
-                              type="button"
-                              className="icon-btn"
-                              title="Xóa bài giao"
-                              onClick={() => handleDeleteAssignment(a.id)}
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {assignments.map((a) => (
+                      <tr key={a.id}>
+                        <td><strong>{a.studentName}</strong></td>
+                        <td>
+                          <div>{a.examTitle}</div>
+                          {a.note && <div className="cell-sub">{a.note}</div>}
+                        </td>
+                        <td className="cell-nowrap">
+                          {a.dueAt ? new Date(a.dueAt).toLocaleString('vi-VN') : 'Không giới hạn'}
+                        </td>
+                        <td>
+                          {a.submissionCount && a.submissionCount > 0
+                            ? `Đã nộp (${a.submissionCount})`
+                            : 'Chưa nộp'}
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            title="Xóa bài giao"
+                            onClick={() => handleDeleteAssignment(a.id)}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -482,90 +488,116 @@ export function TeacherPage() {
         </div>
       )}
 
-      {/* TAB 3: LỚP HỌC */}
-      {!loading && activeTab === 'classes' && (
+      {/* TAB 3: HỌC SINH */}
+      {!loading && activeTab === 'students' && (
         <div className="stack-gap">
           <section className="panel">
-            <h2>Tạo lớp học mới</h2>
-            <form onSubmit={handleCreateClass} className="inline-form">
-              <input
-                type="text"
-                required
-                placeholder="Tên lớp (vd: 8A1, 6A2...)"
-                value={newClassName}
-                onChange={(e) => setNewClassName(e.target.value)}
-              />
-              <select value={newClassGrade} onChange={(e) => setNewClassGrade(Number(e.target.value) as GradeLevel)}>
-                <option value={6}>Khối 6</option>
-                <option value={7}>Khối 7</option>
-                <option value={8}>Khối 8</option>
-                <option value={9}>Khối 9</option>
-              </select>
-              <button type="submit" className="btn-primary">
-                <Plus size={16} /> Tạo lớp
-              </button>
+            <h2>Tạo nhanh tài khoản cho học sinh</h2>
+            <p className="muted-text" style={{ marginBottom: 12 }}>
+              Bạn có thể tạo sẵn tài khoản ở đây rồi gửi tên đăng nhập & mật khẩu cho học sinh (hoặc để học sinh tự đăng ký).
+            </p>
+            <form onSubmit={handleCreateStudent} className="assign-form">
+              <div className="field-row">
+                <div className="field">
+                  <label>Họ và tên học sinh</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ví dụ: Nguyễn Minh Anh"
+                    value={stuFullName}
+                    onChange={(e) => setStuFullName(e.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label>Khối lớp</label>
+                  <select value={stuGrade} onChange={(e) => setStuGrade(Number(e.target.value) as GradeLevel)}>
+                    <option value={6}>Lớp 6</option>
+                    <option value={7}>Lớp 7</option>
+                    <option value={8}>Lớp 8</option>
+                    <option value={9}>Lớp 9</option>
+                  </select>
+                </div>
+              </div>
+              <div className="field-row">
+                <div className="field">
+                  <label>Tên đăng nhập</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ví dụ: minhanh8"
+                    value={stuUsername}
+                    onChange={(e) => setStuUsername(e.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label>Mật khẩu (tối thiểu 6 ký tự)</label>
+                  <input
+                    type="text"
+                    required
+                    minLength={6}
+                    placeholder="Ví dụ: 123456"
+                    value={stuPassword}
+                    onChange={(e) => setStuPassword(e.target.value)}
+                  />
+                </div>
+              </div>
+              {stuMsg && (
+                <div className={stuMsg.type === 'ok' ? 'info-note' : 'form-error'}>{stuMsg.text}</div>
+              )}
+              <div>
+                <button type="submit" className="btn-primary">
+                  <Plus size={16} /> Tạo tài khoản học sinh
+                </button>
+              </div>
             </form>
           </section>
 
-          {classes.length === 0 ? (
-            <div className="panel empty-inline">Chưa có lớp nào. Tạo lớp đầu tiên để lấy mã lớp gửi cho học sinh.</div>
-          ) : (
-            <div className="class-grid">
-              {classes.map((cls) => {
-                const members = membersByClass[cls.id] ?? [];
-                return (
-                  <div key={cls.id} className="panel class-card">
-                    <div className="class-card-head">
-                      <div>
-                        <h3>Lớp {cls.name}</h3>
-                        <span className="muted-text">Khối {cls.grade} · {members.length} học sinh</span>
-                      </div>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        title="Xóa lớp"
-                        onClick={() => handleDeleteClass(cls.id, cls.name)}
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-
-                    <div className="class-code-box">
-                      <span>Mã lớp: <strong>{cls.code}</strong></span>
-                      <button
-                        type="button"
-                        className="btn-secondary btn-sm"
-                        onClick={() => {
-                          void navigator.clipboard?.writeText(cls.code);
-                          setCopiedCode(cls.code);
-                          setTimeout(() => setCopiedCode(null), 2000);
-                        }}
-                      >
-                        <Copy size={14} /> {copiedCode === cls.code ? 'Đã chép' : 'Chép mã'}
-                      </button>
-                    </div>
-
-                    {members.length > 0 ? (
-                      <ul className="member-list">
-                        {members.map((m) => (
-                          <li key={m.studentId}>
-                            <span>{m.fullName}</span>
-                            <small>{m.username}</small>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <div className="cell-sub">Gửi mã <strong>{cls.code}</strong> để học sinh đăng ký và tham gia lớp.</div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          <section className="panel">
+            <h2>Danh sách học sinh ({students.length})</h2>
+            {students.length === 0 ? (
+              <div className="empty-inline">Chưa có học sinh nào.</div>
+            ) : (
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Họ tên</th>
+                      <th>Tên đăng nhập</th>
+                      <th>Khối</th>
+                      <th>Số bài đã nộp</th>
+                      <th>Điểm TB</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {students.map((st) => (
+                      <tr key={st.id}>
+                        <td><strong>{st.fullName}</strong></td>
+                        <td><code>{st.username}</code></td>
+                        <td>{st.grade ? `Lớp ${st.grade}` : '—'}</td>
+                        <td>{st.submissionCount}</td>
+                        <td>{st.avgScore !== null ? st.avgScore.toFixed(2) : '—'}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            title="Xóa học sinh"
+                            onClick={() => handleDeleteStudent(st.id, st.fullName)}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
         </div>
       )}
 
-      {/* MODAL XEM CHI TIẾT BÀI LÀM CỦA HỌC SINH */}
+      {/* MODAL XEM CHI TIẾT BÀI LÀM */}
       {inspectSub && (
         <div className="modal-backdrop" onClick={() => setInspectSub(null)}>
           <div className="inspect-modal" onClick={(e) => e.stopPropagation()}>

@@ -19,31 +19,22 @@ export interface AccountPublic {
   createdAt: string;
 }
 
-export interface ClassroomInfo {
+export interface StudentSummary {
   id: string;
-  teacherId: string;
-  teacherName?: string;
-  name: string;
-  grade: GradeLevel;
-  code: string;
-  studentCount: number;
-  createdAt: string;
-}
-
-export interface ClassMemberInfo {
-  studentId: string;
   username: string;
   fullName: string;
   grade: GradeLevel | null;
-  joinedAt: string;
+  createdAt: string;
+  submissionCount: number;
+  avgScore: number | null;
 }
 
 export interface AssignmentInfo {
   id: string;
   teacherId: string;
   teacherName?: string;
-  classId: string;
-  className?: string;
+  studentId: string | null; // null = giao cho tất cả học sinh
+  studentName?: string;
   examId: string;
   examTitle: string;
   grade: GradeLevel;
@@ -61,8 +52,6 @@ export interface SubmissionRecord {
   studentName: string;
   studentUsername: string;
   assignmentId: string | null;
-  classId: string | null;
-  className: string | null;
   examId: string;
   examTitle: string;
   grade: GradeLevel;

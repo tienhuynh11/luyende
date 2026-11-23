@@ -1,11 +1,10 @@
 import type {
   AccountPublic,
   AssignmentInfo,
-  ClassMemberInfo,
-  ClassroomInfo,
   Exam,
   ExamCategory,
   GradeLevel,
+  StudentSummary,
   SubmissionRecord,
   UserAnswer,
   UserRole,
@@ -58,9 +57,8 @@ export function apiRegister(payload: {
   password: string;
   role: UserRole;
   grade?: GradeLevel;
-  classCode?: string;
   teacherInviteCode?: string;
-}): Promise<{ user: AccountPublic; joinedClass: ClassroomInfo | null }> {
+}): Promise<{ user: AccountPublic }> {
   return request('/api/auth/register', {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -71,15 +69,7 @@ export function apiLogout(): Promise<{ ok: boolean }> {
   return request('/api/auth/logout', { method: 'POST' });
 }
 
-export function apiJoinClass(code: string): Promise<{ classroom: ClassroomInfo }> {
-  return request('/api/classes/join', {
-    method: 'POST',
-    body: JSON.stringify({ code }),
-  });
-}
-
 export function fetchStudentDashboard(): Promise<{
-  classes: ClassroomInfo[];
   assignments: AssignmentInfo[];
   submissions: SubmissionRecord[];
 }> {
@@ -106,27 +96,31 @@ export function apiSaveSubmission(payload: {
 }
 
 export function fetchTeacherDashboard(): Promise<{
-  classes: ClassroomInfo[];
-  membersByClass: Record<string, ClassMemberInfo[]>;
+  students: StudentSummary[];
   assignments: AssignmentInfo[];
   submissions: SubmissionRecord[];
 }> {
   return request('/api/teacher/dashboard');
 }
 
-export function apiCreateClass(name: string, grade: GradeLevel): Promise<{ classroom: ClassroomInfo }> {
-  return request('/api/teacher/classes', {
+export function apiCreateStudent(payload: {
+  username: string;
+  fullName: string;
+  password: string;
+  grade: GradeLevel;
+}): Promise<{ student: StudentSummary }> {
+  return request('/api/teacher/students', {
     method: 'POST',
-    body: JSON.stringify({ name, grade }),
+    body: JSON.stringify(payload),
   });
 }
 
-export function apiDeleteClass(classId: string): Promise<{ ok: boolean }> {
-  return request(`/api/teacher/classes/${encodeURIComponent(classId)}`, { method: 'DELETE' });
+export function apiDeleteStudent(studentId: string): Promise<{ ok: boolean }> {
+  return request(`/api/teacher/students/${encodeURIComponent(studentId)}`, { method: 'DELETE' });
 }
 
 export function apiCreateAssignment(payload: {
-  classId: string;
+  studentId: string | null;
   examId: string;
   examTitle: string;
   grade: GradeLevel;

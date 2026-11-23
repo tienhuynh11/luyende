@@ -17,19 +17,17 @@ import {
   countTeachers,
   createAccount,
   createAssignment,
-  createClass,
   createSession,
   deleteAssignment,
-  deleteClass,
   deleteOrHideStoredExam,
   deleteSession,
+  deleteStudentAccount,
   findAccountByUsername,
   getAccountBySessionToken,
   getStudentDashboard,
   getSubmissionForTeacher,
   getTeacherDashboard,
   isDbEnabled,
-  joinClassByCode,
   listStoredExams,
   saveSubmission,
   upsertStoredExam,
@@ -156,16 +154,11 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
       const passwordHash = await hashPassword(body.password!);
       const user = await createAccount({ username, fullName, passwordHash, role, grade });
 
-      let joinedClass = null;
-      if (role === 'student' && body.classCode?.trim()) {
-        joinedClass = await joinClassByCode(user.id, body.classCode.trim());
-      }
-
       const token = generateSessionToken();
       await createSession(user.id, token);
       setSessionCookie(req, res, token);
 
-      return sendJson(res, 201, { user, joinedClass });
+      return sendJson(res, 201, { user });
     }
 
     if (path === '/api/auth/login' && req.method === 'POST') {
@@ -208,20 +201,6 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
       return sendJson(res, 401, { error: 'Vui lòng đăng nhập để tiếp tục.' });
     }
     const { user } = sess;
-
-    // Student joins class
-    if (path === '/api/classes/join' && req.method === 'POST') {
-      if (user.role !== 'student') {
-        return sendJson(res, 403, { error: 'Chỉ tài khoản học sinh mới tham gia lớp bằng mã.' });
-      }
-      const body = await readJson<{ code?: string }>(req);
-      const code = (body.code ?? '').trim();
-      if (!code) return sendJson(res, 400, { error: 'Vui lòng nhập mã lớp.' });
-
-      const cls = await joinClassByCode(user.id, code);
-      if (!cls) return sendJson(res, 404, { error: 'Không tìm thấy lớp với mã này. Hãy kiểm tra lại mã giáo viên gửi.' });
-      return sendJson(res, 200, { classroom: cls });
-    }
 
     // Student dashboard
     if (path === '/api/student/dashboard' && req.method === 'GET') {
@@ -277,26 +256,47 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
         return sendJson(res, 200, data);
       }
 
-      if (path === '/api/teacher/classes' && req.method === 'POST') {
-        const body = await readJson<{ name?: string; grade?: number }>(req);
-        const name = (body.name ?? '').trim();
-        const grade = Number(body.grade);
-        if (name.length < 1 || name.length > 50 || !isValidGrade(grade)) {
-          return sendJson(res, 400, { error: 'Tên lớp hoặc khối lớp không hợp lệ.' });
+      if (path === '/api/teacher/students' && req.method === 'POST') {
+        const body = await readJson<{ username?: string; fullName?: string; password?: string; grade?: number }>(req);
+        const username = validateUsername(body.username ?? '');
+        if (!username) {
+          return sendJson(res, 400, { error: 'Tên đăng nhập dài 3–32 ký tự, chỉ gồm chữ thường không dấu, số, dấu chấm hoặc gạch dưới.' });
         }
-        const classroom = await createClass(user.id, name, grade);
-        return sendJson(res, 201, { classroom });
+        const fullName = (body.fullName ?? '').trim();
+        if (fullName.length < 2 || fullName.length > 80) {
+          return sendJson(res, 400, { error: 'Họ và tên phải từ 2 đến 80 ký tự.' });
+        }
+        if (!validatePassword(body.password ?? '')) {
+          return sendJson(res, 400, { error: 'Mật khẩu cần tối thiểu 6 ký tự.' });
+        }
+        const existing = await findAccountByUsername(username);
+        if (existing) return sendJson(res, 409, { error: 'Tên đăng nhập này đã tồn tại.' });
+
+        const grade = isValidGrade(Number(body.grade)) ? (Number(body.grade) as GradeLevel) : 6;
+        const passwordHash = await hashPassword(body.password!);
+        const account = await createAccount({ username, fullName, passwordHash, role: 'student', grade });
+        return sendJson(res, 201, {
+          student: {
+            id: account.id,
+            username: account.username,
+            fullName: account.fullName,
+            grade: account.grade,
+            createdAt: account.createdAt,
+            submissionCount: 0,
+            avgScore: null,
+          },
+        });
       }
 
-      if (path.startsWith('/api/teacher/classes/') && req.method === 'DELETE') {
-        const classId = decodeURIComponent(path.slice('/api/teacher/classes/'.length));
-        const ok = await deleteClass(user.id, classId);
-        return ok ? sendJson(res, 200, { ok: true }) : sendJson(res, 404, { error: 'Không tìm thấy lớp.' });
+      if (path.startsWith('/api/teacher/students/') && req.method === 'DELETE') {
+        const studentId = decodeURIComponent(path.slice('/api/teacher/students/'.length));
+        const ok = await deleteStudentAccount(studentId);
+        return ok ? sendJson(res, 200, { ok: true }) : sendJson(res, 404, { error: 'Không tìm thấy học sinh.' });
       }
 
       if (path === '/api/teacher/assignments' && req.method === 'POST') {
         const body = await readJson<{
-          classId?: string;
+          studentId?: string | null;
           examId?: string;
           examTitle?: string;
           grade?: number;
@@ -304,13 +304,13 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
           dueAt?: string | null;
         }>(req);
 
-        if (!body.classId || !body.examId || !body.examTitle || !isValidGrade(Number(body.grade))) {
-          return sendJson(res, 400, { error: 'Thiếu thông tin lớp hoặc đề kiểm tra.' });
+        if (!body.examId || !body.examTitle || !isValidGrade(Number(body.grade))) {
+          return sendJson(res, 400, { error: 'Thiếu thông tin đề kiểm tra.' });
         }
         const dueAt = body.dueAt && !Number.isNaN(Date.parse(body.dueAt)) ? new Date(body.dueAt).toISOString() : null;
         const assignment = await createAssignment({
           teacherId: user.id,
-          classId: body.classId,
+          studentId: body.studentId ? String(body.studentId) : null,
           examId: body.examId,
           examTitle: body.examTitle,
           grade: Number(body.grade) as GradeLevel,
@@ -328,7 +328,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
 
       if (path.startsWith('/api/teacher/submissions/') && req.method === 'GET') {
         const subId = decodeURIComponent(path.slice('/api/teacher/submissions/'.length));
-        const submission = await getSubmissionForTeacher(user.id, subId);
+        const submission = await getSubmissionForTeacher(subId);
         if (!submission) return sendJson(res, 404, { error: 'Không tìm thấy bài làm.' });
         return sendJson(res, 200, { submission });
       }

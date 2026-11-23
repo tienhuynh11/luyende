@@ -42,7 +42,7 @@ export function Layout({ theme, onToggleTheme, children }: LayoutProps) {
             </Link>
             {user?.role === 'teacher' && (
               <Link to="/giao-vien" className={`nav-link ${isTeacher ? 'active' : ''}`}>
-                Quản lý lớp
+                Giao bài & Điểm
               </Link>
             )}
             <Link to="/lich-su" className={`nav-link ${isHistory ? 'active' : ''}`}>

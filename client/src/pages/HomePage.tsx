@@ -1,18 +1,17 @@
 import { Clock, Search } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   CATEGORY_LABELS,
   TEXTBOOK_LABELS,
   type AssignmentInfo,
-  type ClassroomInfo,
   type ExamCategory,
   type GradeLevel,
   type SubjectId,
   type TextbookSeries,
 } from '@shared/types';
 import { SUBJECTS } from '../content';
-import { apiJoinClass, fetchStudentDashboard } from '../lib/api';
+import { fetchStudentDashboard } from '../lib/api';
 import { useAuth } from '../lib/authContext';
 import { useExams } from '../lib/examStore';
 import { loadDraft, loadProgress } from '../lib/storage';
@@ -41,17 +40,12 @@ export function HomePage() {
   const [textbook, setTextbook] = useState<'all' | TextbookSeries>('all');
   const [query, setQuery] = useState('');
 
-  // Student classroom & assignments
-  const [myClasses, setMyClasses] = useState<ClassroomInfo[]>([]);
   const [myAssignments, setMyAssignments] = useState<AssignmentInfo[]>([]);
-  const [joinCode, setJoinCode] = useState('');
-  const [joinMsg, setJoinMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   const loadStudentData = useCallback(async () => {
     if (!user || user.role !== 'student') return;
     try {
       const data = await fetchStudentDashboard();
-      setMyClasses(data.classes);
       setMyAssignments(data.assignments);
     } catch {
       // ignore
@@ -62,20 +56,6 @@ export function HomePage() {
     if (user?.grade) setGrade(user.grade);
     void loadStudentData();
   }, [user, loadStudentData]);
-
-  const handleJoinClass = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!joinCode.trim()) return;
-    setJoinMsg(null);
-    try {
-      const { classroom } = await apiJoinClass(joinCode.trim());
-      setJoinCode('');
-      setJoinMsg({ type: 'ok', text: `Đã tham gia lớp ${classroom.name} (${classroom.teacherName ?? 'Giáo viên'}).` });
-      void loadStudentData();
-    } catch (err) {
-      setJoinMsg({ type: 'err', text: (err as Error).message });
-    }
-  };
 
   const progress = useMemo(() => loadProgress(), []);
 
@@ -115,15 +95,15 @@ export function HomePage() {
 
   return (
     <div className="container">
-      {/* Khu vực tài khoản / Bài giáo viên giao */}
+      {/* Khu vực tài khoản / Bài được giao */}
       {user?.role === 'teacher' && (
         <section className="notice-bar">
           <div>
-            <strong>Chế độ giáo viên ({user.fullName})</strong>
-            <span className="muted-inline"> — Tạo lớp, lấy mã lớp gửi học sinh, giao đề và xem bảng điểm.</span>
+            <strong>Giáo viên: {user.fullName}</strong>
+            <span className="muted-inline"> — Giao đề trực tiếp cho học sinh, sửa đề và xem điểm.</span>
           </div>
           <Link to="/giao-vien" className="btn-primary btn-sm">
-            Vào trang Quản lý lớp
+            Giao bài & Xem điểm
           </Link>
         </section>
       )}
@@ -132,31 +112,14 @@ export function HomePage() {
         <section className="panel student-board">
           <div className="board-head">
             <div>
-              <h2>Bài giáo viên giao</h2>
+              <h2>Bài được giao</h2>
               <div className="muted-text">
-                {myClasses.length > 0
-                  ? `Đang tham gia: ${myClasses.map((c) => `Lớp ${c.name}`).join(', ')}`
-                  : 'Chưa tham gia lớp nào — nhập mã lớp do giáo viên gửi để nhận đề.'}
+                {myAssignments.length > 0
+                  ? `Bạn có ${myAssignments.length} đề giáo viên giao.`
+                  : 'Hiện chưa có bài mới được giao. Bạn có thể tự luyện đề bên dưới.'}
               </div>
             </div>
-            <form onSubmit={handleJoinClass} className="join-inline">
-              <input
-                type="text"
-                placeholder="Nhập mã lớp (vd: T8-AB12)"
-                value={joinCode}
-                onChange={(e) => setJoinCode(e.target.value)}
-              />
-              <button type="submit" className="btn-secondary btn-sm">
-                Tham gia lớp
-              </button>
-            </form>
           </div>
-
-          {joinMsg && (
-            <div className={joinMsg.type === 'ok' ? 'info-note' : 'form-error'} style={{ marginTop: 10 }}>
-              {joinMsg.text}
-            </div>
-          )}
 
           {myAssignments.length > 0 && (
             <div className="assignment-list">
@@ -164,7 +127,7 @@ export function HomePage() {
                 <div key={a.id} className="assignment-row">
                   <div className="assignment-info">
                     <div className="assignment-meta">
-                      <span className="tag">Lớp {a.className}</span>
+                      <span className="tag">Toán Lớp {a.grade}</span>
                       {a.dueAt && (
                         <span className="muted-inline">
                           Hạn nộp: {new Date(a.dueAt).toLocaleString('vi-VN')}
@@ -361,7 +324,7 @@ export function HomePage() {
                           className="btn-secondary btn-sm"
                           onClick={() => navigate(`/giao-vien?assign=${exam.id}`)}
                         >
-                          Giao lớp
+                          Giao bài
                         </button>
                       </>
                     ) : (

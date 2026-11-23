@@ -2,19 +2,18 @@ import pg from 'pg';
 import type {
   AccountPublic,
   AssignmentInfo,
-  ClassMemberInfo,
-  ClassroomInfo,
   Exam,
   ExamCategory,
   GradeLevel,
   Question,
+  StudentSummary,
   SubjectId,
   SubmissionRecord,
   TextbookSeries,
   UserAnswer,
   UserRole,
 } from '../../shared/types.js';
-import { generateClassCode, generateId, hashToken, SESSION_TTL_DAYS } from './auth.js';
+import { generateId, hashToken, SESSION_TTL_DAYS } from './auth.js';
 
 const { Pool } = pg;
 
@@ -67,30 +66,11 @@ export async function initDb(): Promise<boolean> {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_sessions_account ON luyende.sessions(account_id)`);
 
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS luyende.classes (
-      id TEXT PRIMARY KEY,
-      teacher_id TEXT NOT NULL REFERENCES luyende.accounts(id) ON DELETE CASCADE,
-      name TEXT NOT NULL,
-      grade SMALLINT NOT NULL,
-      code TEXT UNIQUE NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS luyende.class_members (
-      class_id TEXT NOT NULL REFERENCES luyende.classes(id) ON DELETE CASCADE,
-      student_id TEXT NOT NULL REFERENCES luyende.accounts(id) ON DELETE CASCADE,
-      joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      PRIMARY KEY (class_id, student_id)
-    )
-  `);
-
-  await pool.query(`
     CREATE TABLE IF NOT EXISTS luyende.assignments (
       id TEXT PRIMARY KEY,
       teacher_id TEXT NOT NULL REFERENCES luyende.accounts(id) ON DELETE CASCADE,
-      class_id TEXT NOT NULL REFERENCES luyende.classes(id) ON DELETE CASCADE,
+      class_id TEXT,
+      student_id TEXT REFERENCES luyende.accounts(id) ON DELETE CASCADE,
       exam_id TEXT NOT NULL,
       exam_title TEXT NOT NULL,
       grade SMALLINT NOT NULL,
@@ -99,6 +79,11 @@ export async function initDb(): Promise<boolean> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  // Safe migration if assignments table already existed with NOT NULL class_id
+  await pool.query(`ALTER TABLE luyende.assignments ALTER COLUMN class_id DROP NOT NULL`).catch(() => {});
+  await pool.query(
+    `ALTER TABLE luyende.assignments ADD COLUMN IF NOT EXISTS student_id TEXT REFERENCES luyende.accounts(id) ON DELETE CASCADE`,
+  );
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS luyende.submissions (
@@ -232,84 +217,17 @@ export async function getAccountBySessionToken(rawToken: string): Promise<Accoun
   };
 }
 
-// --- CLASSROOMS ---
+// --- STUDENTS & ASSIGNMENTS (DIRECT TUTOR FLOW) ---
 
-export async function createClass(teacherId: string, name: string, grade: GradeLevel): Promise<ClassroomInfo> {
+export async function deleteStudentAccount(studentId: string): Promise<boolean> {
   const db = requirePool();
-  const id = generateId('cls');
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const code = generateClassCode(grade);
-    try {
-      const res = await db.query(
-        `INSERT INTO luyende.classes (id, teacher_id, name, grade, code)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id, teacher_id, name, grade, code, created_at`,
-        [id, teacherId, name, grade, code],
-      );
-      const r = res.rows[0];
-      return {
-        id: r.id,
-        teacherId: r.teacher_id,
-        name: r.name,
-        grade: Number(r.grade) as GradeLevel,
-        code: r.code,
-        studentCount: 0,
-        createdAt: r.created_at.toISOString(),
-      };
-    } catch (e) {
-      if ((e as { code?: string }).code !== '23505') throw e;
-    }
-  }
-  throw new Error('Không tạo được mã lớp, vui lòng thử lại.');
-}
-
-export async function deleteClass(teacherId: string, classId: string): Promise<boolean> {
-  const db = requirePool();
-  const res = await db.query(`DELETE FROM luyende.classes WHERE id = $1 AND teacher_id = $2`, [classId, teacherId]);
+  const res = await db.query(`DELETE FROM luyende.accounts WHERE id = $1 AND role = 'student'`, [studentId]);
   return (res.rowCount ?? 0) > 0;
 }
 
-export async function joinClassByCode(studentId: string, code: string): Promise<ClassroomInfo | null> {
-  const db = requirePool();
-  const clsRes = await db.query(
-    `SELECT c.id, c.teacher_id, c.name, c.grade, c.code, c.created_at, a.full_name AS teacher_name
-     FROM luyende.classes c
-     JOIN luyende.accounts a ON a.id = c.teacher_id
-     WHERE UPPER(c.code) = UPPER($1)`,
-    [code.trim()],
-  );
-  const c = clsRes.rows[0];
-  if (!c) return null;
-
-  await db.query(
-    `INSERT INTO luyende.class_members (class_id, student_id)
-     VALUES ($1, $2)
-     ON CONFLICT (class_id, student_id) DO NOTHING`,
-    [c.id, studentId],
-  );
-
-  const cntRes = await db.query<{ count: string }>(
-    `SELECT COUNT(*)::text AS count FROM luyende.class_members WHERE class_id = $1`,
-    [c.id],
-  );
-
-  return {
-    id: c.id,
-    teacherId: c.teacher_id,
-    teacherName: c.teacher_name,
-    name: c.name,
-    grade: Number(c.grade) as GradeLevel,
-    code: c.code,
-    studentCount: Number(cntRes.rows[0]?.count ?? 1),
-    createdAt: c.created_at.toISOString(),
-  };
-}
-
-// --- ASSIGNMENTS ---
-
 export async function createAssignment(input: {
   teacherId: string;
-  classId: string;
+  studentId: string | null;
   examId: string;
   examTitle: string;
   grade: GradeLevel;
@@ -317,26 +235,28 @@ export async function createAssignment(input: {
   dueAt: string | null;
 }): Promise<AssignmentInfo> {
   const db = requirePool();
-  // Verify teacher owns class
-  const own = await db.query(`SELECT name FROM luyende.classes WHERE id = $1 AND teacher_id = $2`, [
-    input.classId,
-    input.teacherId,
-  ]);
-  if (own.rows.length === 0) throw new Error('Bạn không có quyền giao bài cho lớp này.');
+  let studentName: string | undefined;
+  if (input.studentId) {
+    const st = await db.query(`SELECT full_name FROM luyende.accounts WHERE id = $1 AND role = 'student'`, [
+      input.studentId,
+    ]);
+    if (st.rows.length === 0) throw new Error('Không tìm thấy học sinh này.');
+    studentName = st.rows[0].full_name;
+  }
 
   const id = generateId('asg');
   const res = await db.query(
-    `INSERT INTO luyende.assignments (id, teacher_id, class_id, exam_id, exam_title, grade, note, due_at)
+    `INSERT INTO luyende.assignments (id, teacher_id, student_id, exam_id, exam_title, grade, note, due_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-     RETURNING id, teacher_id, class_id, exam_id, exam_title, grade, note, due_at, created_at`,
-    [id, input.teacherId, input.classId, input.examId, input.examTitle, input.grade, input.note, input.dueAt],
+     RETURNING id, teacher_id, student_id, exam_id, exam_title, grade, note, due_at, created_at`,
+    [id, input.teacherId, input.studentId, input.examId, input.examTitle, input.grade, input.note, input.dueAt],
   );
   const r = res.rows[0];
   return {
     id: r.id,
     teacherId: r.teacher_id,
-    classId: r.class_id,
-    className: own.rows[0].name,
+    studentId: r.student_id ?? null,
+    studentName: studentName ?? 'Tất cả học sinh',
     examId: r.exam_id,
     examTitle: r.exam_title,
     grade: Number(r.grade) as GradeLevel,
@@ -408,46 +328,21 @@ export async function saveSubmission(input: {
 // --- DASHBOARDS ---
 
 export async function getStudentDashboard(studentId: string): Promise<{
-  classes: ClassroomInfo[];
   assignments: AssignmentInfo[];
   submissions: SubmissionRecord[];
 }> {
   const db = requirePool();
 
-  const clsRes = await db.query(
-    `SELECT c.id, c.teacher_id, a.full_name AS teacher_name, c.name, c.grade, c.code, c.created_at,
-            (SELECT COUNT(*) FROM luyende.class_members cm2 WHERE cm2.class_id = c.id)::int AS student_count
-     FROM luyende.class_members cm
-     JOIN luyende.classes c ON c.id = cm.class_id
-     JOIN luyende.accounts a ON a.id = c.teacher_id
-     WHERE cm.student_id = $1
-     ORDER BY cm.joined_at DESC`,
-    [studentId],
-  );
-
-  const classes: ClassroomInfo[] = clsRes.rows.map((r) => ({
-    id: r.id,
-    teacherId: r.teacher_id,
-    teacherName: r.teacher_name,
-    name: r.name,
-    grade: Number(r.grade) as GradeLevel,
-    code: r.code,
-    studentCount: Number(r.student_count),
-    createdAt: r.created_at.toISOString(),
-  }));
-
   const asgRes = await db.query(
-    `SELECT asg.id, asg.teacher_id, t.full_name AS teacher_name, asg.class_id, c.name AS class_name,
+    `SELECT asg.id, asg.teacher_id, t.full_name AS teacher_name, asg.student_id,
             asg.exam_id, asg.exam_title, asg.grade, asg.note, asg.due_at, asg.created_at,
             (SELECT MAX(s.score) FROM luyende.submissions s
              WHERE s.student_id = $1 AND (s.assignment_id = asg.id OR s.exam_id = asg.exam_id)) AS my_best_score,
             (SELECT MAX(s.submitted_at) FROM luyende.submissions s
              WHERE s.student_id = $1 AND (s.assignment_id = asg.id OR s.exam_id = asg.exam_id)) AS my_submitted_at
-     FROM luyende.class_members cm
-     JOIN luyende.assignments asg ON asg.class_id = cm.class_id
-     JOIN luyende.classes c ON c.id = asg.class_id
+     FROM luyende.assignments asg
      JOIN luyende.accounts t ON t.id = asg.teacher_id
-     WHERE cm.student_id = $1
+     WHERE asg.student_id IS NULL OR asg.student_id = $1
      ORDER BY asg.created_at DESC`,
     [studentId],
   );
@@ -456,8 +351,7 @@ export async function getStudentDashboard(studentId: string): Promise<{
     id: r.id,
     teacherId: r.teacher_id,
     teacherName: r.teacher_name,
-    classId: r.class_id,
-    className: r.class_name,
+    studentId: r.student_id ?? null,
     examId: r.exam_id,
     examTitle: r.exam_title,
     grade: Number(r.grade) as GradeLevel,
@@ -470,82 +364,56 @@ export async function getStudentDashboard(studentId: string): Promise<{
 
   const subRes = await db.query(
     `SELECT s.id, s.student_id, a.full_name AS student_name, a.username AS student_username,
-            s.assignment_id, asg.class_id, c.name AS class_name,
-            s.exam_id, s.exam_title, s.grade, s.category, s.mode,
+            s.assignment_id, s.exam_id, s.exam_title, s.grade, s.category, s.mode,
             s.score, s.correct_count, s.total_questions, s.duration_seconds, s.submitted_at
      FROM luyende.submissions s
      JOIN luyende.accounts a ON a.id = s.student_id
-     LEFT JOIN luyende.assignments asg ON asg.id = s.assignment_id
-     LEFT JOIN luyende.classes c ON c.id = asg.class_id
      WHERE s.student_id = $1
      ORDER BY s.submitted_at DESC
      LIMIT 100`,
     [studentId],
   );
 
-  const submissions: SubmissionRecord[] = subRes.rows.map(mapSubmissionRow);
-
-  return { classes, assignments, submissions };
+  return { assignments, submissions: subRes.rows.map(mapSubmissionRow) };
 }
 
 export async function getTeacherDashboard(teacherId: string): Promise<{
-  classes: ClassroomInfo[];
-  membersByClass: Record<string, ClassMemberInfo[]>;
+  students: StudentSummary[];
   assignments: AssignmentInfo[];
   submissions: SubmissionRecord[];
 }> {
   const db = requirePool();
 
-  const clsRes = await db.query(
-    `SELECT c.id, c.teacher_id, c.name, c.grade, c.code, c.created_at,
-            (SELECT COUNT(*) FROM luyende.class_members cm WHERE cm.class_id = c.id)::int AS student_count
-     FROM luyende.classes c
-     WHERE c.teacher_id = $1
-     ORDER BY c.created_at DESC`,
-    [teacherId],
+  const stuRes = await db.query(
+    `SELECT a.id, a.username, a.full_name, a.grade, a.created_at,
+            COUNT(s.id)::int AS submission_count,
+            AVG(s.score) AS avg_score
+     FROM luyende.accounts a
+     LEFT JOIN luyende.submissions s ON s.student_id = a.id
+     WHERE a.role = 'student'
+     GROUP BY a.id
+     ORDER BY a.created_at DESC`,
   );
 
-  const classes: ClassroomInfo[] = clsRes.rows.map((r) => ({
+  const students: StudentSummary[] = stuRes.rows.map((r) => ({
     id: r.id,
-    teacherId: r.teacher_id,
-    name: r.name,
-    grade: Number(r.grade) as GradeLevel,
-    code: r.code,
-    studentCount: Number(r.student_count),
+    username: r.username,
+    fullName: r.full_name,
+    grade: r.grade ? (Number(r.grade) as GradeLevel) : null,
     createdAt: r.created_at.toISOString(),
+    submissionCount: Number(r.submission_count),
+    avgScore: r.avg_score !== null ? Number(r.avg_score) : null,
   }));
 
-  const memRes = await db.query(
-    `SELECT cm.class_id, a.id AS student_id, a.username, a.full_name, a.grade, cm.joined_at
-     FROM luyende.class_members cm
-     JOIN luyende.classes c ON c.id = cm.class_id
-     JOIN luyende.accounts a ON a.id = cm.student_id
-     WHERE c.teacher_id = $1
-     ORDER BY a.full_name ASC`,
-    [teacherId],
-  );
-
-  const membersByClass: Record<string, ClassMemberInfo[]> = {};
-  for (const r of memRes.rows) {
-    if (!membersByClass[r.class_id]) membersByClass[r.class_id] = [];
-    membersByClass[r.class_id].push({
-      studentId: r.student_id,
-      username: r.username,
-      fullName: r.full_name,
-      grade: r.grade ? (Number(r.grade) as GradeLevel) : null,
-      joinedAt: r.joined_at.toISOString(),
-    });
-  }
-
   const asgRes = await db.query(
-    `SELECT asg.id, asg.teacher_id, asg.class_id, c.name AS class_name,
+    `SELECT asg.id, asg.teacher_id, asg.student_id, st.full_name AS student_name,
             asg.exam_id, asg.exam_title, asg.grade, asg.note, asg.due_at, asg.created_at,
             (SELECT COUNT(DISTINCT s.student_id)
              FROM luyende.submissions s
-             JOIN luyende.class_members cm ON cm.student_id = s.student_id AND cm.class_id = asg.class_id
-             WHERE s.assignment_id = asg.id OR s.exam_id = asg.exam_id)::int AS submission_count
+             WHERE (s.assignment_id = asg.id OR s.exam_id = asg.exam_id)
+               AND (asg.student_id IS NULL OR s.student_id = asg.student_id))::int AS submission_count
      FROM luyende.assignments asg
-     JOIN luyende.classes c ON c.id = asg.class_id
+     LEFT JOIN luyende.accounts st ON st.id = asg.student_id
      WHERE asg.teacher_id = $1
      ORDER BY asg.created_at DESC`,
     [teacherId],
@@ -554,8 +422,8 @@ export async function getTeacherDashboard(teacherId: string): Promise<{
   const assignments: AssignmentInfo[] = asgRes.rows.map((r) => ({
     id: r.id,
     teacherId: r.teacher_id,
-    classId: r.class_id,
-    className: r.class_name,
+    studentId: r.student_id ?? null,
+    studentName: r.student_name ?? 'Tất cả học sinh',
     examId: r.exam_id,
     examTitle: r.exam_title,
     grade: Number(r.grade) as GradeLevel,
@@ -565,47 +433,31 @@ export async function getTeacherDashboard(teacherId: string): Promise<{
     submissionCount: Number(r.submission_count),
   }));
 
-  // All submissions by students who belong to any class of this teacher
   const subRes = await db.query(
-    `SELECT DISTINCT ON (s.id)
-            s.id, s.student_id, a.full_name AS student_name, a.username AS student_username,
-            s.assignment_id, c.id AS class_id, c.name AS class_name,
-            s.exam_id, s.exam_title, s.grade, s.category, s.mode,
+    `SELECT s.id, s.student_id, a.full_name AS student_name, a.username AS student_username,
+            s.assignment_id, s.exam_id, s.exam_title, s.grade, s.category, s.mode,
             s.score, s.correct_count, s.total_questions, s.duration_seconds, s.submitted_at
      FROM luyende.submissions s
      JOIN luyende.accounts a ON a.id = s.student_id
-     JOIN luyende.class_members cm ON cm.student_id = s.student_id
-     JOIN luyende.classes c ON c.id = cm.class_id
-     WHERE c.teacher_id = $1
-     ORDER BY s.id, s.submitted_at DESC`,
-    [teacherId],
+     WHERE a.role = 'student'
+     ORDER BY s.submitted_at DESC
+     LIMIT 300`,
   );
 
-  const submissions = subRes.rows
-    .map(mapSubmissionRow)
-    .sort((x, y) => new Date(y.submittedAt).getTime() - new Date(x.submittedAt).getTime())
-    .slice(0, 300);
-
-  return { classes, membersByClass, assignments, submissions };
+  return { students, assignments, submissions: subRes.rows.map(mapSubmissionRow) };
 }
 
-export async function getSubmissionForTeacher(
-  teacherId: string,
-  submissionId: string,
-): Promise<SubmissionRecord | null> {
+export async function getSubmissionForTeacher(submissionId: string): Promise<SubmissionRecord | null> {
   const db = requirePool();
   const res = await db.query(
     `SELECT s.id, s.student_id, a.full_name AS student_name, a.username AS student_username,
-            s.assignment_id, c.id AS class_id, c.name AS class_name,
-            s.exam_id, s.exam_title, s.grade, s.category, s.mode,
+            s.assignment_id, s.exam_id, s.exam_title, s.grade, s.category, s.mode,
             s.score, s.correct_count, s.total_questions, s.duration_seconds, s.answers, s.submitted_at
      FROM luyende.submissions s
      JOIN luyende.accounts a ON a.id = s.student_id
-     JOIN luyende.class_members cm ON cm.student_id = s.student_id
-     JOIN luyende.classes c ON c.id = cm.class_id
-     WHERE s.id = $1 AND c.teacher_id = $2
+     WHERE s.id = $1
      LIMIT 1`,
-    [submissionId, teacherId],
+    [submissionId],
   );
   if (res.rows.length === 0) return null;
   const r = res.rows[0];
@@ -748,8 +600,6 @@ function mapSubmissionRow(r: any): SubmissionRecord {
     studentName: r.student_name,
     studentUsername: r.student_username,
     assignmentId: r.assignment_id,
-    classId: r.class_id ?? null,
-    className: r.class_name ?? null,
     examId: r.exam_id,
     examTitle: r.exam_title,
     grade: Number(r.grade) as GradeLevel,
