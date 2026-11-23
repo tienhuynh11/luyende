@@ -11,9 +11,10 @@ import {
   type SubjectId,
   type TextbookSeries,
 } from '@shared/types';
-import { SUBJECTS, getExams } from '../content';
+import { SUBJECTS } from '../content';
 import { apiJoinClass, fetchStudentDashboard } from '../lib/api';
 import { useAuth } from '../lib/authContext';
+import { useExams } from '../lib/examStore';
 import { loadDraft, loadProgress } from '../lib/storage';
 
 const GRADES: GradeLevel[] = [6, 7, 8, 9];
@@ -28,6 +29,7 @@ const CATEGORIES: Array<{ id: 'all' | ExamCategory; label: string }> = [
 export function HomePage() {
   const navigate = useNavigate();
   const { user, config } = useAuth();
+  const { allExams, getExamsBySubjectGrade, isCustom, isOverridden } = useExams();
 
   const [subjectId, setSubjectId] = useState<SubjectId>('toan');
   const [grade, setGrade] = useState<GradeLevel>(() => {
@@ -86,7 +88,7 @@ export function HomePage() {
     return map;
   }, [progress]);
 
-  const exams = useMemo(() => getExams(subjectId, grade), [subjectId, grade]);
+  const exams = useMemo(() => getExamsBySubjectGrade(subjectId, grade), [getExamsBySubjectGrade, subjectId, grade]);
 
   const filteredExams = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -215,25 +217,35 @@ export function HomePage() {
             Học kì 1 · Năm học 2026–2027 · Bám sát Kết nối tri thức, Chân trời sáng tạo, Cánh diều.
           </p>
         </div>
-        <button type="button" className="btn-secondary btn-sm" onClick={handleRandomExam}>
-          Tạo đề ngẫu nhiên Toán {grade}
-        </button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {user?.role === 'teacher' && (
+            <button type="button" className="btn-primary btn-sm" onClick={() => navigate('/giao-vien/tao-de')}>
+              + Tạo đề mới
+            </button>
+          )}
+          <button type="button" className="btn-secondary btn-sm" onClick={handleRandomExam}>
+            Tạo đề ngẫu nhiên Toán {grade}
+          </button>
+        </div>
       </div>
 
       {/* Chọn môn */}
       <div className="subject-bar">
-        {SUBJECTS.map((subj) => (
-          <button
-            key={subj.id}
-            type="button"
-            disabled={!subj.available}
-            className={`subject-tab ${subjectId === subj.id ? 'active' : ''}`}
-            onClick={() => subj.available && setSubjectId(subj.id)}
-          >
-            {subj.name}
-            {!subj.available && <small> (sắp có)</small>}
-          </button>
-        ))}
+        {SUBJECTS.map((subj) => {
+          const hasExams = subj.available || allExams.some((e) => e.subjectId === subj.id);
+          return (
+            <button
+              key={subj.id}
+              type="button"
+              disabled={!hasExams}
+              className={`subject-tab ${subjectId === subj.id ? 'active' : ''}`}
+              onClick={() => hasExams && setSubjectId(subj.id)}
+            >
+              {subj.name}
+              {!hasExams && <small> (chưa có đề)</small>}
+            </button>
+          );
+        })}
       </div>
 
       {/* Chọn khối lớp + bộ lọc */}
@@ -305,6 +317,9 @@ export function HomePage() {
                   <div className="exam-card-top">
                     <span className={`cat-badge cat-${exam.category}`}>{CATEGORY_LABELS[exam.category]}</span>
                     <span className="book-badge">{TEXTBOOK_LABELS[exam.textbook]}</span>
+                    {(isCustom(exam.id) || isOverridden(exam.id)) && (
+                      <span className="tag">{isCustom(exam.id) ? 'GV tạo' : 'Đã sửa'}</span>
+                    )}
                   </div>
 
                   <h3 className="exam-title">{exam.title}</h3>
@@ -324,7 +339,7 @@ export function HomePage() {
                     </div>
                   )}
 
-                  <div className="exam-card-actions">
+                  <div className={user?.role === 'teacher' ? 'exam-card-actions teacher-3' : 'exam-card-actions'}>
                     <button
                       type="button"
                       className="btn-primary btn-sm"
@@ -333,13 +348,22 @@ export function HomePage() {
                       {draft ? 'Làm tiếp' : 'Làm bài'}
                     </button>
                     {user?.role === 'teacher' ? (
-                      <button
-                        type="button"
-                        className="btn-secondary btn-sm"
-                        onClick={() => navigate(`/giao-vien?assign=${exam.id}`)}
-                      >
-                        Giao lớp
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          className="btn-secondary btn-sm"
+                          onClick={() => navigate(`/giao-vien/sua-de/${exam.id}`)}
+                        >
+                          Sửa đề
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-secondary btn-sm"
+                          onClick={() => navigate(`/giao-vien?assign=${exam.id}`)}
+                        >
+                          Giao lớp
+                        </button>
+                      </>
                     ) : (
                       <button
                         type="button"

@@ -11,7 +11,6 @@ import {
   type SubmissionRecord,
 } from '@shared/types';
 import { QuestionCard } from '../components/QuestionCard';
-import { getExamById, getExams } from '../content';
 import {
   apiCreateAssignment,
   apiCreateClass,
@@ -21,6 +20,7 @@ import {
   fetchTeacherDashboard,
 } from '../lib/api';
 import { useAuth } from '../lib/authContext';
+import { useExams } from '../lib/examStore';
 
 function formatDuration(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -32,9 +32,10 @@ export function TeacherPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { user, loading: authLoading } = useAuth();
+  const { allExams, getExam } = useExams();
 
   const preselectExamId = searchParams.get('assign') ?? '';
-  const preselectExam = preselectExamId ? getExamById(preselectExamId) : undefined;
+  const preselectExam = preselectExamId ? getExam(preselectExamId) : undefined;
 
   const [activeTab, setActiveTab] = useState<'results' | 'assignments' | 'classes'>(
     preselectExam ? 'assignments' : 'results',
@@ -92,7 +93,10 @@ export function TeacherPage() {
     }
   }, [authLoading, user, loadData]);
 
-  const gradeExams = useMemo(() => getExams('toan', assignGrade), [assignGrade]);
+  const gradeExams = useMemo(
+    () => allExams.filter((e) => e.grade === assignGrade),
+    [allExams, assignGrade],
+  );
 
   useEffect(() => {
     if (gradeExams.length > 0 && !gradeExams.some((e) => e.id === assignExamId)) {
@@ -158,7 +162,7 @@ export function TeacherPage() {
 
   const handleCreateAssignment = async (e: FormEvent) => {
     e.preventDefault();
-    const exam = getExamById(assignExamId);
+    const exam = getExam(assignExamId);
     if (!assignClassId || !exam) return;
     try {
       const { assignment } = await apiCreateAssignment({
@@ -221,7 +225,7 @@ export function TeacherPage() {
     URL.revokeObjectURL(url);
   };
 
-  const inspectExam = inspectSub ? getExamById(inspectSub.examId) : undefined;
+  const inspectExam = inspectSub ? getExam(inspectSub.examId) : undefined;
   const inspectGraded = inspectSub && inspectExam && inspectSub.answers ? gradeExam(inspectExam, inspectSub.answers) : null;
 
   return (
@@ -252,6 +256,13 @@ export function TeacherPage() {
             onClick={() => setActiveTab('classes')}
           >
             Lớp học ({classes.length})
+          </button>
+          <button
+            type="button"
+            className="btn-primary btn-sm"
+            onClick={() => navigate('/giao-vien/tao-de')}
+          >
+            <Plus size={15} /> Tạo đề mới
           </button>
         </div>
       </div>

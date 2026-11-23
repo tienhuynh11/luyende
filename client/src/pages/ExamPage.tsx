@@ -15,9 +15,10 @@ import {
   type UserAnswer,
 } from '@shared/types';
 import { QuestionCard } from '../components/QuestionCard';
-import { generateCustomMathExam, getExamById } from '../content';
+import { generateCustomMathExam } from '../content';
 import { apiSaveSubmission } from '../lib/api';
 import { useAuth } from '../lib/authContext';
+import { useExams } from '../lib/examStore';
 import { clearDraft, loadDraft, recordAttempt, saveDraft } from '../lib/storage';
 
 function formatTime(sec: number): string {
@@ -40,19 +41,20 @@ export function ExamPage() {
   const params = useParams<{ examId?: string; grade?: string; seed?: string }>();
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
+  const { getExam } = useExams();
 
   const modeParam = searchParams.get('mode') === 'practice' ? 'practice' : 'exam';
   const assignmentId = searchParams.get('assignment');
 
   const exam = useMemo(() => {
-    if (params.examId) return getExamById(params.examId);
+    if (params.examId) return getExam(params.examId);
     const g = Number(params.grade) as GradeLevel;
     const seed = Number(params.seed) || 12345;
     if (g === 6 || g === 7 || g === 8 || g === 9) {
       return generateCustomMathExam(g, seed);
     }
     return undefined;
-  }, [params.examId, params.grade, params.seed]);
+  }, [params.examId, params.grade, params.seed, getExam]);
 
   const initialDraft = useMemo(() => (exam ? loadDraft(exam.id) : null), [exam]);
 

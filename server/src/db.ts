@@ -4,9 +4,13 @@ import type {
   AssignmentInfo,
   ClassMemberInfo,
   ClassroomInfo,
+  Exam,
   ExamCategory,
   GradeLevel,
+  Question,
+  SubjectId,
   SubmissionRecord,
+  TextbookSeries,
   UserAnswer,
   UserRole,
 } from '../../shared/types.js';
@@ -116,6 +120,25 @@ export async function initDb(): Promise<boolean> {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_submissions_student ON luyende.submissions(student_id)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_submissions_assignment ON luyende.submissions(assignment_id)`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS luyende.custom_exams (
+      id TEXT PRIMARY KEY,
+      teacher_id TEXT NOT NULL REFERENCES luyende.accounts(id) ON DELETE CASCADE,
+      subject_id TEXT NOT NULL DEFAULT 'toan',
+      grade SMALLINT NOT NULL,
+      title TEXT NOT NULL,
+      subtitle TEXT NOT NULL DEFAULT '',
+      category TEXT NOT NULL,
+      textbook TEXT NOT NULL DEFAULT 'chung',
+      duration_minutes INT NOT NULL DEFAULT 45,
+      source_note TEXT NOT NULL DEFAULT '',
+      topics JSONB NOT NULL DEFAULT '[]'::jsonb,
+      questions JSONB NOT NULL DEFAULT '[]'::jsonb,
+      is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
 
   console.log('[db] Postgres (schema luyende) sẵn sàng');
   return true;
@@ -590,6 +613,131 @@ export async function getSubmissionForTeacher(
     ...mapSubmissionRow(r),
     answers: r.answers as Record<string, UserAnswer>,
   };
+}
+
+// --- CUSTOM & EDITED EXAMS ---
+
+export interface StoredExamRow {
+  exam: Exam;
+  isDeleted: boolean;
+  teacherId: string;
+  updatedAt: string;
+}
+
+export async function listStoredExams(): Promise<StoredExamRow[]> {
+  if (!pool) return [];
+  const res = await pool.query(
+    `SELECT id, teacher_id, subject_id, grade, title, subtitle, category, textbook,
+            duration_minutes, source_note, topics, questions, is_deleted, updated_at
+     FROM luyende.custom_exams
+     ORDER BY updated_at DESC`,
+  );
+  return res.rows.map((r) => ({
+    teacherId: r.teacher_id,
+    isDeleted: Boolean(r.is_deleted),
+    updatedAt: r.updated_at.toISOString(),
+    exam: {
+      id: r.id,
+      subjectId: (r.subject_id || 'toan') as SubjectId,
+      grade: Number(r.grade) as GradeLevel,
+      title: r.title,
+      subtitle: r.subtitle || '',
+      category: (r.category || 'cuoi-hk1') as ExamCategory,
+      textbook: (r.textbook || 'chung') as TextbookSeries,
+      term: 'HK1',
+      schoolYear: '2026–2027',
+      durationMinutes: Number(r.duration_minutes) || 45,
+      topics: Array.isArray(r.topics) ? r.topics : [],
+      questions: Array.isArray(r.questions) ? (r.questions as Question[]) : [],
+      sourceNote: r.source_note || undefined,
+    },
+  }));
+}
+
+export async function upsertStoredExam(teacherId: string, exam: Exam): Promise<StoredExamRow> {
+  const db = requirePool();
+  const id = exam.id?.trim() || generateId('exam');
+  const topics =
+    exam.topics && exam.topics.length > 0
+      ? exam.topics
+      : Array.from(new Set(exam.questions.map((q) => q.topic).filter(Boolean)));
+
+  const res = await db.query(
+    `INSERT INTO luyende.custom_exams (
+      id, teacher_id, subject_id, grade, title, subtitle, category, textbook,
+      duration_minutes, source_note, topics, questions, is_deleted, updated_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,FALSE,NOW())
+    ON CONFLICT (id) DO UPDATE SET
+      teacher_id = $2,
+      subject_id = $3,
+      grade = $4,
+      title = $5,
+      subtitle = $6,
+      category = $7,
+      textbook = $8,
+      duration_minutes = $9,
+      source_note = $10,
+      topics = $11::jsonb,
+      questions = $12::jsonb,
+      is_deleted = FALSE,
+      updated_at = NOW()
+    RETURNING id, teacher_id, subject_id, grade, title, subtitle, category, textbook,
+              duration_minutes, source_note, topics, questions, is_deleted, updated_at`,
+    [
+      id,
+      teacherId,
+      exam.subjectId || 'toan',
+      exam.grade,
+      exam.title.trim(),
+      (exam.subtitle || '').trim(),
+      exam.category || 'cuoi-hk1',
+      exam.textbook || 'chung',
+      Math.max(5, Math.min(180, Number(exam.durationMinutes) || 45)),
+      (exam.sourceNote || '').trim(),
+      JSON.stringify(topics),
+      JSON.stringify(exam.questions),
+    ],
+  );
+  const r = res.rows[0];
+  return {
+    teacherId: r.teacher_id,
+    isDeleted: Boolean(r.is_deleted),
+    updatedAt: r.updated_at.toISOString(),
+    exam: {
+      id: r.id,
+      subjectId: r.subject_id as SubjectId,
+      grade: Number(r.grade) as GradeLevel,
+      title: r.title,
+      subtitle: r.subtitle || '',
+      category: r.category as ExamCategory,
+      textbook: r.textbook as TextbookSeries,
+      term: 'HK1',
+      schoolYear: '2026–2027',
+      durationMinutes: Number(r.duration_minutes),
+      topics: Array.isArray(r.topics) ? r.topics : [],
+      questions: Array.isArray(r.questions) ? (r.questions as Question[]) : [],
+      sourceNote: r.source_note || undefined,
+    },
+  };
+}
+
+export async function deleteOrHideStoredExam(
+  teacherId: string,
+  examId: string,
+  mode: 'delete' | 'hide',
+): Promise<void> {
+  const db = requirePool();
+  if (mode === 'delete') {
+    await db.query(`DELETE FROM luyende.custom_exams WHERE id = $1`, [examId]);
+  } else {
+    await db.query(
+      `INSERT INTO luyende.custom_exams (
+        id, teacher_id, subject_id, grade, title, category, is_deleted, updated_at
+      ) VALUES ($1, $2, 'toan', 6, '', 'cuoi-hk1', TRUE, NOW())
+      ON CONFLICT (id) DO UPDATE SET is_deleted = TRUE, updated_at = NOW()`,
+      [examId, teacherId],
+    );
+  }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

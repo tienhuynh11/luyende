@@ -3,12 +3,20 @@ import type {
   AssignmentInfo,
   ClassMemberInfo,
   ClassroomInfo,
+  Exam,
   ExamCategory,
   GradeLevel,
   SubmissionRecord,
   UserAnswer,
   UserRole,
 } from '@shared/types';
+
+export interface StoredExamDto {
+  exam: Exam;
+  isDeleted: boolean;
+  teacherId: string;
+  updatedAt: string;
+}
 
 export interface ServerConfig {
   dbEnabled: boolean;
@@ -137,4 +145,21 @@ export function apiDeleteAssignment(assignmentId: string): Promise<{ ok: boolean
 
 export function fetchSubmissionDetail(submissionId: string): Promise<{ submission: SubmissionRecord }> {
   return request(`/api/teacher/submissions/${encodeURIComponent(submissionId)}`);
+}
+
+export function fetchStoredExams(): Promise<{ exams: StoredExamDto[] }> {
+  return request('/api/exams');
+}
+
+export function apiSaveExam(exam: Exam): Promise<{ stored: StoredExamDto }> {
+  return request('/api/teacher/exams', {
+    method: 'POST',
+    body: JSON.stringify({ exam }),
+  });
+}
+
+export function apiDeleteOrHideExam(examId: string, mode: 'delete' | 'hide'): Promise<{ ok: boolean }> {
+  return request(`/api/teacher/exams/${encodeURIComponent(examId)}?mode=${mode}`, {
+    method: 'DELETE',
+  });
 }

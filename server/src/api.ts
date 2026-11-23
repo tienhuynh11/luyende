@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { AccountPublic, ExamCategory, GradeLevel, UserAnswer, UserRole } from '../../shared/types.js';
+import type { AccountPublic, Exam, ExamCategory, GradeLevel, UserAnswer, UserRole } from '../../shared/types.js';
 import {
   checkRateLimit,
   clearSessionCookie,
@@ -21,6 +21,7 @@ import {
   createSession,
   deleteAssignment,
   deleteClass,
+  deleteOrHideStoredExam,
   deleteSession,
   findAccountByUsername,
   getAccountBySessionToken,
@@ -29,7 +30,9 @@ import {
   getTeacherDashboard,
   isDbEnabled,
   joinClassByCode,
+  listStoredExams,
   saveSubmission,
+  upsertStoredExam,
 } from './db.js';
 
 function sendJson(res: ServerResponse, status: number, body: unknown) {
@@ -78,7 +81,16 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
     }
 
     if (!isDbEnabled()) {
+      if (path === '/api/exams' && req.method === 'GET') {
+        return sendJson(res, 200, { exams: [] });
+      }
       return sendJson(res, 503, { error: 'Máy chủ chưa kết nối cơ sở dữ liệu Postgres (DATABASE_URL).' });
+    }
+
+    // Public list of teacher-created / edited exams
+    if (path === '/api/exams' && req.method === 'GET') {
+      const rows = await listStoredExams();
+      return sendJson(res, 200, { exams: rows });
     }
 
     // --- AUTH ---
@@ -319,6 +331,27 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
         const submission = await getSubmissionForTeacher(user.id, subId);
         if (!submission) return sendJson(res, 404, { error: 'Không tìm thấy bài làm.' });
         return sendJson(res, 200, { submission });
+      }
+
+      if (path === '/api/teacher/exams' && req.method === 'POST') {
+        const body = await readJson<{ exam?: Exam }>(req);
+        const exam = body.exam;
+        if (!exam || !exam.title?.trim() || !isValidGrade(Number(exam.grade)) || !Array.isArray(exam.questions) || exam.questions.length === 0) {
+          return sendJson(res, 400, { error: 'Đề kiểm tra cần có tiêu đề, khối lớp (6–9) và ít nhất 1 câu hỏi.' });
+        }
+        const saved = await upsertStoredExam(user.id, {
+          ...exam,
+          grade: Number(exam.grade) as GradeLevel,
+        });
+        return sendJson(res, 200, { stored: saved });
+      }
+
+      if (path.startsWith('/api/teacher/exams/') && req.method === 'DELETE') {
+        const examId = decodeURIComponent(path.slice('/api/teacher/exams/'.length));
+        const urlObj = new URL(req.url ?? path, 'http://localhost');
+        const mode = urlObj.searchParams.get('mode') === 'hide' ? 'hide' : 'delete';
+        await deleteOrHideStoredExam(user.id, examId, mode);
+        return sendJson(res, 200, { ok: true });
       }
     }
 

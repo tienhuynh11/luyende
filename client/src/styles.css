@@ -654,6 +654,150 @@ h3 {
   margin-top: 4px;
 }
 
+.exam-card-actions.teacher-3 {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+/* EXAM EDITOR */
+.editor-top-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.editor-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.snippet-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.snippet-btn {
+  border: 1px solid var(--line);
+  background: var(--bg);
+  padding: 4px 9px;
+  border-radius: 5px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.snippet-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.editor-q-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.editor-q-tools {
+  display: flex;
+  gap: 5px;
+}
+
+.editor-textarea {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  font-family: inherit;
+  font-size: 14.5px;
+  resize: vertical;
+}
+
+.editor-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.preview-box {
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  font-size: 15px;
+  overflow-x: auto;
+}
+
+.editor-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.editor-opt-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.editor-opt-row input[type='text'] {
+  flex: 1;
+  min-width: 180px;
+}
+
+.opt-preview {
+  font-size: 14px;
+  color: var(--accent);
+  padding: 4px 8px;
+  background: var(--accent-soft);
+  border-radius: 5px;
+}
+
+.editor-bottom-bar {
+  margin-top: 18px;
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.editor-add-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .editor-meta-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .editor-meta-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* AUTH & FORMS */
 .auth-panel {
   margin-top: 16px;
