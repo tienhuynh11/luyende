@@ -124,14 +124,16 @@ async function compressImageFile(file: File): Promise<string> {
 }
 
 function drawItemOnCtx(ctx: CanvasRenderingContext2D, w: number, h: number, item: WhiteboardItem) {
+  const scale = w / 1000; // giữ tỉ lệ nét & chữ đồng nhất giữa PC và Mobile
   ctx.save();
   if (item.kind === 'text') {
+    const fs = Math.max(11, item.fontSize * scale);
     ctx.fillStyle = item.color;
-    ctx.font = `600 ${item.fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+    ctx.font = `600 ${fs}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
     ctx.textBaseline = 'top';
     const lines = item.text.split('\n');
     lines.forEach((line, idx) => {
-      ctx.fillText(line, item.x * w, item.y * h + idx * (item.fontSize * 1.3));
+      ctx.fillText(line, item.x * w, item.y * h + idx * (fs * 1.3));
     });
     ctx.restore();
     return;
@@ -149,13 +151,13 @@ function drawItemOnCtx(ctx: CanvasRenderingContext2D, w: number, h: number, item
   if (item.tool === 'highlighter') {
     ctx.globalAlpha = 0.32;
     ctx.strokeStyle = item.color;
-    ctx.lineWidth = Math.max(14, item.width * 4.5);
+    ctx.lineWidth = Math.max(10, item.width * 4.5) * scale;
   } else if (item.tool === 'eraser') {
     ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = Math.max(14, item.width * 4);
+    ctx.lineWidth = Math.max(12, item.width * 4) * scale;
   } else {
     ctx.strokeStyle = item.color;
-    ctx.lineWidth = item.width;
+    ctx.lineWidth = Math.max(1.2, item.width * scale);
   }
 
   if (item.tool === 'line' && pts.length >= 2) {
@@ -246,16 +248,21 @@ export function LiveClassPage() {
   const [meetDraft, setMeetDraft] = useState('');
   const [uploadingImg, setUploadingImg] = useState(false);
 
-  // Floating Chat Bubble
+  // Floating Chat Bubble + quick preview toast
   const [chatOpen, setChatOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [chatPreview, setChatPreview] = useState<LiveChatMessage | null>(null);
+  const chatPreviewTimerRef = useRef<number | null>(null);
   const [chatText, setChatText] = useState('');
   const chatOpenRef = useRef(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     chatOpenRef.current = chatOpen;
-    if (chatOpen) setUnreadCount(0);
+    if (chatOpen) {
+      setUnreadCount(0);
+      setChatPreview(null);
+    }
   }, [chatOpen]);
 
   const isTeacher = user?.role === 'teacher';
@@ -337,6 +344,9 @@ export function LiveClassPage() {
         });
         if (!chatOpenRef.current && msg.authorId !== user.id) {
           setUnreadCount((c) => c + 1);
+          setChatPreview(msg);
+          if (chatPreviewTimerRef.current) window.clearTimeout(chatPreviewTimerRef.current);
+          chatPreviewTimerRef.current = window.setTimeout(() => setChatPreview(null), 5500);
         }
       } catch {
         // ignore
@@ -688,6 +698,23 @@ export function LiveClassPage() {
           <p className="muted-text">Vui lòng đăng nhập bằng tài khoản Gia sư hoặc Học sinh để vào phòng học.</p>
           <button type="button" className="btn-primary" onClick={() => navigate('/dang-nhap')}>
             Đăng nhập
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Học sinh KHÔNG được vào phòng khi gia sư chưa bấm "Mở phòng"
+  if (!isTeacher && !room.active) {
+    return (
+      <div className="container narrow-container" style={{ marginTop: 24 }}>
+        <div className="panel" style={{ textAlign: 'center', padding: '28px 22px' }}>
+          <h1 style={{ fontSize: 20, marginBottom: 8 }}>Phòng học trực tiếp chưa mở</h1>
+          <p className="muted-text" style={{ marginBottom: 16 }}>
+            Gia sư hiện chưa mở phòng dạy. Khi gia sư mở phòng, màn hình này sẽ tự động vào lớp ngay lập tức.
+          </p>
+          <button type="button" className="btn-secondary btn-sm" onClick={() => navigate('/')}>
+            Quay về bài tập được giao
           </button>
         </div>
       </div>
@@ -1219,6 +1246,28 @@ export function LiveClassPage() {
                 <Send size={15} />
               </button>
             </form>
+          </div>
+        )}
+
+        {!chatOpen && chatPreview && (
+          <div className="chat-preview-toast" onClick={() => setChatOpen(true)} role="button" tabIndex={0}>
+            <div className="chat-preview-head">
+              <strong>{chatPreview.authorName}</strong>
+              <button
+                type="button"
+                className="chat-preview-close"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setChatPreview(null);
+                }}
+                aria-label="Đóng xem trước"
+              >
+                <X size={13} />
+              </button>
+            </div>
+            <div className="chat-preview-text">
+              <MathText text={chatPreview.text} />
+            </div>
           </div>
         )}
 

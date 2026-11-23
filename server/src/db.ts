@@ -7,10 +7,12 @@ import type {
   GradeLevel,
   NotificationItem,
   Question,
+  ResultReleaseMode,
   StudentSummary,
   SubjectId,
   SubmissionRecord,
   TextbookSeries,
+  TheoryNote,
   UserAnswer,
   UserRole,
 } from '../../shared/types.js';
@@ -85,6 +87,9 @@ export async function initDb(): Promise<boolean> {
   await pool.query(
     `ALTER TABLE luyende.assignments ADD COLUMN IF NOT EXISTS student_id TEXT REFERENCES luyende.accounts(id) ON DELETE CASCADE`,
   );
+  await pool.query(
+    `ALTER TABLE luyende.assignments ADD COLUMN IF NOT EXISTS result_mode TEXT NOT NULL DEFAULT 'immediate'`,
+  );
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS luyende.submissions (
@@ -106,7 +111,8 @@ export async function initDb(): Promise<boolean> {
       adjusted_score NUMERIC(5, 2),
       submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       reviewed_at TIMESTAMPTZ,
-      feedback_at TIMESTAMPTZ
+      feedback_at TIMESTAMPTZ,
+      published_at TIMESTAMPTZ
     )
   `);
   await pool.query(`ALTER TABLE luyende.submissions ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ`);
@@ -114,8 +120,26 @@ export async function initDb(): Promise<boolean> {
   await pool.query(`ALTER TABLE luyende.submissions ADD COLUMN IF NOT EXISTS question_notes JSONB NOT NULL DEFAULT '{}'::jsonb`);
   await pool.query(`ALTER TABLE luyende.submissions ADD COLUMN IF NOT EXISTS adjusted_score NUMERIC(5, 2)`);
   await pool.query(`ALTER TABLE luyende.submissions ADD COLUMN IF NOT EXISTS feedback_at TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE luyende.submissions ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ`);
+  // Existing historical submissions without published_at default to published so older history stays visible
+  await pool.query(`UPDATE luyende.submissions SET published_at = submitted_at WHERE published_at IS NULL AND assignment_id IS NULL`).catch(() => {});
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_submissions_student ON luyende.submissions(student_id)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_submissions_assignment ON luyende.submissions(assignment_id)`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS luyende.theory_notes (
+      id TEXT PRIMARY KEY,
+      teacher_id TEXT NOT NULL REFERENCES luyende.accounts(id) ON DELETE CASCADE,
+      student_id TEXT REFERENCES luyende.accounts(id) ON DELETE CASCADE,
+      subject_id TEXT NOT NULL DEFAULT 'toan',
+      grade SMALLINT NOT NULL,
+      title TEXT NOT NULL,
+      summary TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL DEFAULT '',
+      image_data_url TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS luyende.custom_exams (
@@ -244,6 +268,7 @@ export async function createAssignment(input: {
   grade: GradeLevel;
   note: string;
   dueAt: string | null;
+  resultMode: ResultReleaseMode;
 }): Promise<AssignmentInfo> {
   const db = requirePool();
   let studentName: string | undefined;
@@ -257,10 +282,20 @@ export async function createAssignment(input: {
 
   const id = generateId('asg');
   const res = await db.query(
-    `INSERT INTO luyende.assignments (id, teacher_id, student_id, exam_id, exam_title, grade, note, due_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-     RETURNING id, teacher_id, student_id, exam_id, exam_title, grade, note, due_at, created_at`,
-    [id, input.teacherId, input.studentId, input.examId, input.examTitle, input.grade, input.note, input.dueAt],
+    `INSERT INTO luyende.assignments (id, teacher_id, student_id, exam_id, exam_title, grade, note, due_at, result_mode)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     RETURNING id, teacher_id, student_id, exam_id, exam_title, grade, note, due_at, result_mode, created_at`,
+    [
+      id,
+      input.teacherId,
+      input.studentId,
+      input.examId,
+      input.examTitle,
+      input.grade,
+      input.note,
+      input.dueAt,
+      input.resultMode,
+    ],
   );
   const r = res.rows[0];
   return {
@@ -273,6 +308,7 @@ export async function createAssignment(input: {
     grade: Number(r.grade) as GradeLevel,
     note: r.note,
     dueAt: r.due_at ? r.due_at.toISOString() : null,
+    resultMode: r.result_mode === 'after-review' ? 'after-review' : 'immediate',
     createdAt: r.created_at.toISOString(),
     submissionCount: 0,
   };
@@ -302,20 +338,27 @@ export async function saveSubmission(input: {
   totalQuestions: number;
   durationSeconds: number;
   answers: Record<string, UserAnswer>;
-}): Promise<{ id: string; submittedAt: string }> {
+}): Promise<{ id: string; submittedAt: string; published: boolean }> {
   const db = requirePool();
   let validAssignmentId = input.assignmentId;
+  let releaseMode: ResultReleaseMode = 'immediate';
+
   if (validAssignmentId) {
-    const chk = await db.query(`SELECT id FROM luyende.assignments WHERE id = $1`, [validAssignmentId]);
-    if (chk.rows.length === 0) validAssignmentId = null;
+    const chk = await db.query(`SELECT id, result_mode FROM luyende.assignments WHERE id = $1`, [validAssignmentId]);
+    if (chk.rows.length === 0) {
+      validAssignmentId = null;
+    } else if (chk.rows[0].result_mode === 'after-review') {
+      releaseMode = 'after-review';
+    }
   }
 
+  const published = releaseMode === 'immediate';
   const id = generateId('sub');
   const res = await db.query(
     `INSERT INTO luyende.submissions (
       id, student_id, assignment_id, exam_id, exam_title, grade, category, mode,
-      score, correct_count, total_questions, duration_seconds, answers
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
+      score, correct_count, total_questions, duration_seconds, answers, published_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb, ${published ? 'NOW()' : 'NULL'})
     RETURNING id, submitted_at`,
     [
       id,
@@ -333,7 +376,7 @@ export async function saveSubmission(input: {
       JSON.stringify(input.answers),
     ],
   );
-  return { id: res.rows[0].id, submittedAt: res.rows[0].submitted_at.toISOString() };
+  return { id: res.rows[0].id, submittedAt: res.rows[0].submitted_at.toISOString(), published };
 }
 
 // --- DASHBOARDS ---
@@ -346,11 +389,13 @@ export async function getStudentDashboard(studentId: string): Promise<{
 
   const asgRes = await db.query(
     `SELECT asg.id, asg.teacher_id, t.full_name AS teacher_name, asg.student_id,
-            asg.exam_id, asg.exam_title, asg.grade, asg.note, asg.due_at, asg.created_at,
-            (SELECT MAX(s.score) FROM luyende.submissions s
-             WHERE s.student_id = $1 AND (s.assignment_id = asg.id OR s.exam_id = asg.exam_id)) AS my_best_score,
+            asg.exam_id, asg.exam_title, asg.grade, asg.note, asg.due_at, asg.result_mode, asg.created_at,
+            (SELECT MAX(COALESCE(s.adjusted_score, s.score)) FROM luyende.submissions s
+             WHERE s.student_id = $1 AND s.published_at IS NOT NULL AND (s.assignment_id = asg.id OR s.exam_id = asg.exam_id)) AS my_best_score,
             (SELECT MAX(s.submitted_at) FROM luyende.submissions s
-             WHERE s.student_id = $1 AND (s.assignment_id = asg.id OR s.exam_id = asg.exam_id)) AS my_submitted_at
+             WHERE s.student_id = $1 AND (s.assignment_id = asg.id OR s.exam_id = asg.exam_id)) AS my_submitted_at,
+            EXISTS(SELECT 1 FROM luyende.submissions s
+             WHERE s.student_id = $1 AND s.published_at IS NULL AND (s.assignment_id = asg.id OR s.exam_id = asg.exam_id)) AS my_pending_review
      FROM luyende.assignments asg
      JOIN luyende.accounts t ON t.id = asg.teacher_id
      WHERE asg.student_id IS NULL OR asg.student_id = $1
@@ -368,16 +413,18 @@ export async function getStudentDashboard(studentId: string): Promise<{
     grade: Number(r.grade) as GradeLevel,
     note: r.note,
     dueAt: r.due_at ? r.due_at.toISOString() : null,
+    resultMode: r.result_mode === 'after-review' ? 'after-review' : 'immediate',
     createdAt: r.created_at.toISOString(),
     myBestScore: r.my_best_score !== null ? Number(r.my_best_score) : null,
     mySubmittedAt: r.my_submitted_at ? r.my_submitted_at.toISOString() : null,
+    myPendingReview: Boolean(r.my_pending_review),
   }));
 
   const subRes = await db.query(
     `SELECT s.id, s.student_id, a.full_name AS student_name, a.username AS student_username,
             s.assignment_id, s.exam_id, s.exam_title, s.grade, s.category, s.mode,
             s.score, s.adjusted_score, s.correct_count, s.total_questions, s.duration_seconds,
-            s.teacher_note, s.submitted_at, s.reviewed_at, s.feedback_at
+            s.teacher_note, s.submitted_at, s.reviewed_at, s.feedback_at, s.published_at
      FROM luyende.submissions s
      JOIN luyende.accounts a ON a.id = s.student_id
      WHERE s.student_id = $1
@@ -419,7 +466,7 @@ export async function getTeacherDashboard(teacherId: string): Promise<{
 
   const asgRes = await db.query(
     `SELECT asg.id, asg.teacher_id, asg.student_id, st.full_name AS student_name,
-            asg.exam_id, asg.exam_title, asg.grade, asg.note, asg.due_at, asg.created_at,
+            asg.exam_id, asg.exam_title, asg.grade, asg.note, asg.due_at, asg.result_mode, asg.created_at,
             (SELECT COUNT(DISTINCT s.student_id)
              FROM luyende.submissions s
              WHERE (s.assignment_id = asg.id OR s.exam_id = asg.exam_id)
@@ -441,6 +488,7 @@ export async function getTeacherDashboard(teacherId: string): Promise<{
     grade: Number(r.grade) as GradeLevel,
     note: r.note,
     dueAt: r.due_at ? r.due_at.toISOString() : null,
+    resultMode: r.result_mode === 'after-review' ? 'after-review' : 'immediate',
     createdAt: r.created_at.toISOString(),
     submissionCount: Number(r.submission_count),
   }));
@@ -449,7 +497,7 @@ export async function getTeacherDashboard(teacherId: string): Promise<{
     `SELECT s.id, s.student_id, a.full_name AS student_name, a.username AS student_username,
             s.assignment_id, s.exam_id, s.exam_title, s.grade, s.category, s.mode,
             s.score, s.adjusted_score, s.correct_count, s.total_questions, s.duration_seconds,
-            s.teacher_note, s.submitted_at, s.reviewed_at, s.feedback_at
+            s.teacher_note, s.submitted_at, s.reviewed_at, s.feedback_at, s.published_at
      FROM luyende.submissions s
      JOIN luyende.accounts a ON a.id = s.student_id
      WHERE a.role = 'student'
@@ -469,7 +517,7 @@ export async function getSubmissionForTeacher(submissionId: string): Promise<Sub
     `SELECT s.id, s.student_id, a.full_name AS student_name, a.username AS student_username,
             s.assignment_id, s.exam_id, s.exam_title, s.grade, s.category, s.mode,
             s.score, s.adjusted_score, s.correct_count, s.total_questions, s.duration_seconds,
-            s.answers, s.teacher_note, s.question_notes, s.submitted_at, s.reviewed_at, s.feedback_at
+            s.answers, s.teacher_note, s.question_notes, s.submitted_at, s.reviewed_at, s.feedback_at, s.published_at
      FROM luyende.submissions s
      JOIN luyende.accounts a ON a.id = s.student_id
      WHERE s.id = $1
@@ -491,7 +539,7 @@ export async function getSubmissionForStudent(studentId: string, submissionId: s
     `SELECT s.id, s.student_id, a.full_name AS student_name, a.username AS student_username,
             s.assignment_id, s.exam_id, s.exam_title, s.grade, s.category, s.mode,
             s.score, s.adjusted_score, s.correct_count, s.total_questions, s.duration_seconds,
-            s.answers, s.teacher_note, s.question_notes, s.submitted_at, s.reviewed_at, s.feedback_at
+            s.answers, s.teacher_note, s.question_notes, s.submitted_at, s.reviewed_at, s.feedback_at, s.published_at
      FROM luyende.submissions s
      JOIN luyende.accounts a ON a.id = s.student_id
      WHERE s.id = $1 AND s.student_id = $2
@@ -500,6 +548,9 @@ export async function getSubmissionForStudent(studentId: string, submissionId: s
   );
   if (res.rows.length === 0) return null;
   const r = res.rows[0];
+  if (!r.published_at) {
+    return null; // Chưa được gia sư công bố kết quả
+  }
   return {
     ...mapSubmissionRow(r),
     answers: r.answers as Record<string, UserAnswer>,
@@ -509,7 +560,12 @@ export async function getSubmissionForStudent(studentId: string, submissionId: s
 
 export async function saveSubmissionFeedback(
   submissionId: string,
-  input: { teacherNote: string; questionNotes: Record<string, string>; adjustedScore: number | null },
+  input: {
+    teacherNote: string;
+    questionNotes: Record<string, string>;
+    adjustedScore: number | null;
+    publishResult?: boolean;
+  },
 ): Promise<SubmissionRecord | null> {
   const db = requirePool();
   const cleanNotes: Record<string, string> = {};
@@ -522,6 +578,8 @@ export async function saveSubmissionFeedback(
       ? Math.max(0, Math.min(10, Math.round(input.adjustedScore * 100) / 100))
       : null;
 
+  const publishSql = input.publishResult ? ', published_at = COALESCE(published_at, NOW())' : '';
+
   const res = await db.query(
     `UPDATE luyende.submissions
      SET teacher_note = $2,
@@ -529,6 +587,7 @@ export async function saveSubmissionFeedback(
          adjusted_score = $4,
          reviewed_at = COALESCE(reviewed_at, NOW()),
          feedback_at = NOW()
+         ${publishSql}
      WHERE id = $1
      RETURNING id`,
     [submissionId, (input.teacherNote ?? '').trim().slice(0, 2000), JSON.stringify(cleanNotes), adj],
@@ -633,12 +692,14 @@ export async function getNotificationsForUser(user: AccountPublic): Promise<Noti
       });
     }
 
-    // Học sinh: bài làm vừa được gia sư chữa trong 7 ngày gần đây
+    // Học sinh: bài làm vừa được gia sư chữa & công bố trong 7 ngày gần đây
     const fbRes = await db.query(
-      `SELECT id, exam_title, teacher_note, adjusted_score, score, feedback_at
+      `SELECT id, exam_title, teacher_note, adjusted_score, score, COALESCE(feedback_at, published_at) AS notified_at
        FROM luyende.submissions
-       WHERE student_id = $1 AND feedback_at IS NOT NULL AND feedback_at > NOW() - INTERVAL '7 days'
-       ORDER BY feedback_at DESC
+       WHERE student_id = $1 AND published_at IS NOT NULL
+         AND (feedback_at IS NOT NULL OR published_at > submitted_at + INTERVAL '5 seconds')
+         AND COALESCE(feedback_at, published_at) > NOW() - INTERVAL '7 days'
+       ORDER BY COALESCE(feedback_at, published_at) DESC
        LIMIT 5`,
       [user.id],
     );
@@ -647,11 +708,11 @@ export async function getNotificationsForUser(user: AccountPublic): Promise<Noti
       items.push({
         id: `fb-${r.id}`,
         kind: 'teacher-feedback',
-        title: `Gia sư đã chữa bài: ${r.exam_title} (${finalScore.toFixed(2)}đ)`,
-        detail: r.teacher_note || 'Bấm để xem ghi chú chữa bài chi tiết của gia sư',
+        title: `Gia sư đã công bố & chữa bài: ${r.exam_title} (${finalScore.toFixed(2)}đ)`,
+        detail: r.teacher_note || 'Bấm để xem điểm và nhận xét chữa bài của gia sư',
         link: `/lich-su?xem=${r.id}`,
         urgent: false,
-        timestamp: r.feedback_at.toISOString(),
+        timestamp: r.notified_at.toISOString(),
         submissionId: r.id,
       });
     }
@@ -807,5 +868,108 @@ function mapSubmissionRow(r: any): SubmissionRecord {
     submittedAt: r.submitted_at.toISOString(),
     reviewedAt: r.reviewed_at ? r.reviewed_at.toISOString() : null,
     feedbackAt: r.feedback_at ? r.feedback_at.toISOString() : null,
+    publishedAt: r.published_at ? r.published_at.toISOString() : null,
   };
+}
+
+// --- THEORY NOTES (BỘ LÝ THUYẾT) ---
+
+export async function listTheoryNotesForUser(user: AccountPublic): Promise<TheoryNote[]> {
+  const db = requirePool();
+  const res =
+    user.role === 'teacher'
+      ? await db.query(
+          `SELECT n.id, n.teacher_id, t.full_name AS teacher_name, n.student_id, st.full_name AS student_name,
+                  n.subject_id, n.grade, n.title, n.summary, n.content, n.image_data_url, n.updated_at
+           FROM luyende.theory_notes n
+           JOIN luyende.accounts t ON t.id = n.teacher_id
+           LEFT JOIN luyende.accounts st ON st.id = n.student_id
+           ORDER BY n.updated_at DESC`,
+        )
+      : await db.query(
+          `SELECT n.id, n.teacher_id, t.full_name AS teacher_name, n.student_id, NULL AS student_name,
+                  n.subject_id, n.grade, n.title, n.summary, n.content, n.image_data_url, n.updated_at
+           FROM luyende.theory_notes n
+           JOIN luyende.accounts t ON t.id = n.teacher_id
+           WHERE n.student_id IS NULL OR n.student_id = $1
+           ORDER BY n.updated_at DESC`,
+          [user.id],
+        );
+
+  return res.rows.map((r) => ({
+    id: r.id,
+    teacherId: r.teacher_id,
+    teacherName: r.teacher_name,
+    studentId: r.student_id ?? null,
+    studentName: r.student_name ?? 'Tất cả học sinh',
+    subjectId: (r.subject_id || 'toan') as SubjectId,
+    grade: Number(r.grade) as GradeLevel,
+    title: r.title,
+    summary: r.summary ?? '',
+    content: r.content ?? '',
+    imageDataUrl: r.image_data_url ?? null,
+    updatedAt: r.updated_at.toISOString(),
+  }));
+}
+
+export async function upsertTheoryNote(
+  teacherId: string,
+  input: {
+    id?: string;
+    studentId: string | null;
+    subjectId: SubjectId;
+    grade: GradeLevel;
+    title: string;
+    summary: string;
+    content: string;
+    imageDataUrl: string | null;
+  },
+): Promise<TheoryNote> {
+  const db = requirePool();
+  const id = input.id?.trim() || generateId('thy');
+  const res = await db.query(
+    `INSERT INTO luyende.theory_notes (
+       id, teacher_id, student_id, subject_id, grade, title, summary, content, image_data_url, updated_at
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
+     ON CONFLICT (id) DO UPDATE SET
+       student_id = $3,
+       subject_id = $4,
+       grade = $5,
+       title = $6,
+       summary = $7,
+       content = $8,
+       image_data_url = $9,
+       updated_at = NOW()
+     RETURNING id, teacher_id, student_id, subject_id, grade, title, summary, content, image_data_url, updated_at`,
+    [
+      id,
+      teacherId,
+      input.studentId || null,
+      input.subjectId || 'toan',
+      input.grade,
+      input.title.trim().slice(0, 180),
+      (input.summary ?? '').trim().slice(0, 400),
+      (input.content ?? '').slice(0, 30000),
+      input.imageDataUrl && input.imageDataUrl.startsWith('data:image/') ? input.imageDataUrl : null,
+    ],
+  );
+  const r = res.rows[0];
+  return {
+    id: r.id,
+    teacherId: r.teacher_id,
+    studentId: r.student_id ?? null,
+    subjectId: r.subject_id as SubjectId,
+    grade: Number(r.grade) as GradeLevel,
+    title: r.title,
+    summary: r.summary ?? '',
+    content: r.content ?? '',
+    imageDataUrl: r.image_data_url ?? null,
+    updatedAt: r.updated_at.toISOString(),
+  };
+}
+
+export async function deleteTheoryNote(teacherId: string, noteId: string): Promise<boolean> {
+  const db = requirePool();
+  const res = await db.query(`DELETE FROM luyende.theory_notes WHERE id = $1 AND teacher_id = $2`, [noteId, teacherId]);
+  return (res.rowCount ?? 0) > 0;
 }

@@ -10,6 +10,7 @@ import {
   type ExamCategory,
   type GradeLevel,
   type McqQuestion,
+  type MultiSelectQuestion,
   type Question,
   type ShortAnswerQuestion,
   type SubjectId,
@@ -48,6 +49,19 @@ function createEmptyMcq(): McqQuestion {
     options: ['Phương án A', 'Phương án B', 'Phương án C', 'Phương án D'],
     correctIndex: 0,
     explanation: 'Nhập lời giải chi tiết cho câu này...',
+    topic: 'Tổng hợp',
+    difficulty: 'thong-hieu',
+  };
+}
+
+function createEmptyMultiSelect(): MultiSelectQuestion {
+  return {
+    id: makeId('ms'),
+    type: 'multi-select',
+    prompt: 'Chọn tất cả các khẳng định đúng sau đây:',
+    options: ['Khẳng định A', 'Khẳng định B', 'Khẳng định C', 'Khẳng định D'],
+    correctIndices: [0, 1],
+    explanation: 'Giải thích lý do các đáp án đúng...',
     topic: 'Tổng hợp',
     difficulty: 'thong-hieu',
   };
@@ -434,7 +448,13 @@ export function ExamEditorPage() {
                 <div className="q-meta">
                   <span className="q-num">Câu {idx + 1}</span>
                   <span className="q-pill">
-                    {q.type === 'mcq' ? 'Trắc nghiệm 4 lựa chọn' : q.type === 'true-false' ? 'Đúng / Sai (4 ý)' : 'Trả lời ngắn'}
+                    {q.type === 'mcq'
+                      ? 'Chọn 1 đáp án'
+                      : q.type === 'multi-select'
+                        ? 'Chọn nhiều đáp án'
+                        : q.type === 'true-false'
+                          ? 'Đúng / Sai (4 ý)'
+                          : 'Trả lời ngắn'}
                   </span>
                   <button
                     type="button"
@@ -539,6 +559,47 @@ export function ExamEditorPage() {
                 </div>
               )}
 
+              {/* MULTI-SELECT EDITOR */}
+              {q.type === 'multi-select' && (
+                <div className="editor-opts">
+                  <label style={{ fontSize: 13.5, fontWeight: 600 }}>4 phương án (tích chọn tất cả đáp án đúng):</label>
+                  {(['A', 'B', 'C', 'D'] as const).map((letter, optIdx) => {
+                    const checked = q.correctIndices.includes(optIdx);
+                    return (
+                      <div key={letter} className="editor-opt-row">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {
+                            const next = checked
+                              ? q.correctIndices.filter((i) => i !== optIdx)
+                              : [...q.correctIndices, optIdx].sort((a, b) => a - b);
+                            updateQuestion(idx, { ...q, correctIndices: next.length ? next : [optIdx] });
+                          }}
+                        />
+                        <strong style={{ width: 20 }}>{letter}.</strong>
+                        <input
+                          type="text"
+                          className="sa-input"
+                          style={{ maxWidth: 'none' }}
+                          value={q.options[optIdx]}
+                          onChange={(e) => {
+                            const opts = [...q.options] as [string, string, string, string];
+                            opts[optIdx] = e.target.value;
+                            updateQuestion(idx, { ...q, options: opts });
+                          }}
+                        />
+                        {isPreview && (
+                          <span className="opt-preview">
+                            <MathText text={q.options[optIdx]} />
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               {/* TRUE/FALSE EDITOR */}
               {q.type === 'true-false' && (
                 <div className="editor-opts">
@@ -627,13 +688,16 @@ export function ExamEditorPage() {
       <div className="editor-bottom-bar">
         <div className="editor-add-group">
           <button type="button" className="btn-secondary btn-sm" onClick={() => appendQuestion(createEmptyMcq())}>
-            <Plus size={15} /> Thêm Trắc nghiệm A/B/C/D
+            <Plus size={15} /> Chọn 1 đáp án
+          </button>
+          <button type="button" className="btn-secondary btn-sm" onClick={() => appendQuestion(createEmptyMultiSelect())}>
+            <Plus size={15} /> Chọn nhiều đáp án
           </button>
           <button type="button" className="btn-secondary btn-sm" onClick={() => appendQuestion(createEmptyTrueFalse())}>
-            <Plus size={15} /> Thêm Đúng / Sai
+            <Plus size={15} /> Đúng / Sai
           </button>
           <button type="button" className="btn-secondary btn-sm" onClick={() => appendQuestion(createEmptyShortAnswer())}>
-            <Plus size={15} /> Thêm Trả lời ngắn
+            <Plus size={15} /> Trả lời ngắn
           </button>
         </div>
 

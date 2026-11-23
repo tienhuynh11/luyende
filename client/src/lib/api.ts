@@ -6,8 +6,11 @@ import type {
   GradeLevel,
   LiveRoomState,
   NotificationItem,
+  ResultReleaseMode,
   StudentSummary,
+  SubjectId,
   SubmissionRecord,
+  TheoryNote,
   UserAnswer,
   UserRole,
   WhiteboardItem,
@@ -92,7 +95,7 @@ export function apiSaveSubmission(payload: {
   totalQuestions: number;
   durationSeconds: number;
   answers: Record<string, UserAnswer>;
-}): Promise<{ id: string; submittedAt: string }> {
+}): Promise<{ id: string; submittedAt: string; published: boolean }> {
   return request('/api/submissions', {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -130,6 +133,7 @@ export function apiCreateAssignment(payload: {
   grade: GradeLevel;
   note: string;
   dueAt: string | null;
+  resultMode: ResultReleaseMode;
 }): Promise<{ assignment: AssignmentInfo }> {
   return request('/api/teacher/assignments', {
     method: 'POST',
@@ -172,12 +176,41 @@ export function apiMarkAllReviewed(): Promise<{ ok: boolean }> {
 
 export function apiSaveSubmissionFeedback(
   submissionId: string,
-  payload: { teacherNote: string; questionNotes: Record<string, string>; adjustedScore: number | null },
+  payload: {
+    teacherNote: string;
+    questionNotes: Record<string, string>;
+    adjustedScore: number | null;
+    publishResult?: boolean;
+  },
 ): Promise<{ submission: SubmissionRecord }> {
   return request(`/api/teacher/submissions/${encodeURIComponent(submissionId)}/feedback`, {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+}
+
+export function fetchTheoryNotes(): Promise<{ notes: TheoryNote[] }> {
+  return request('/api/theory');
+}
+
+export function apiSaveTheoryNote(payload: {
+  id?: string;
+  studentId: string | null;
+  subjectId: SubjectId;
+  grade: GradeLevel;
+  title: string;
+  summary: string;
+  content: string;
+  imageDataUrl: string | null;
+}): Promise<{ note: TheoryNote }> {
+  return request('/api/teacher/theory', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function apiDeleteTheoryNote(noteId: string): Promise<{ ok: boolean }> {
+  return request(`/api/teacher/theory/${encodeURIComponent(noteId)}`, { method: 'DELETE' });
 }
 
 export function fetchStudentSubmissionDetail(submissionId: string): Promise<{ submission: SubmissionRecord }> {

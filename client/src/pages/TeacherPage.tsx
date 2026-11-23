@@ -6,6 +6,7 @@ import {
   CATEGORY_LABELS,
   type AssignmentInfo,
   type GradeLevel,
+  type ResultReleaseMode,
   type StudentSummary,
   type SubmissionRecord,
 } from '@shared/types';
@@ -55,6 +56,7 @@ export function TeacherPage() {
   const [assignExamId, setAssignExamId] = useState(preselectExam?.id ?? '');
   const [assignDue, setAssignDue] = useState('');
   const [assignNote, setAssignNote] = useState('');
+  const [assignResultMode, setAssignResultMode] = useState<ResultReleaseMode>('immediate');
 
   // Form: tạo nhanh tài khoản học sinh
   const [stuFullName, setStuFullName] = useState('');
@@ -152,6 +154,7 @@ export function TeacherPage() {
         grade: exam.grade,
         note: assignNote,
         dueAt: assignDue ? new Date(assignDue).toISOString() : null,
+        resultMode: assignResultMode,
       });
       setAssignments((prev) => [assignment, ...prev]);
       setAssignNote('');
@@ -225,7 +228,7 @@ export function TeacherPage() {
     }
   }, [refreshNotifications]);
 
-  const handleSaveFeedback = async () => {
+  const handleSaveFeedback = async (publishResult: boolean) => {
     if (!inspectSub) return;
     setFbSaving(true);
     setFbSavedMsg(null);
@@ -235,10 +238,15 @@ export function TeacherPage() {
         teacherNote: fbTeacherNote,
         questionNotes: fbQuestionNotes,
         adjustedScore: adj,
+        publishResult,
       });
       setInspectSub(submission);
       setSubmissions((prev) => prev.map((s) => (s.id === submission.id ? { ...s, ...submission } : s)));
-      setFbSavedMsg('Đã lưu phần chữa bài! Học sinh sẽ nhận được thông báo ngay.');
+      setFbSavedMsg(
+        publishResult
+          ? 'Đã lưu & công bố kết quả! Học sinh sẽ nhận được thông báo ngay.'
+          : 'Đã lưu nháp phần chữa bài (chưa công bố cho học sinh).',
+      );
     } catch (err) {
       alert((err as Error).message);
     } finally {
@@ -395,6 +403,7 @@ export function TeacherPage() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                           <strong>{s.studentName}</strong>
                           {!s.reviewedAt && <span className="tag">Mới</span>}
+                          {!s.publishedAt && <span className="tag-urgent">Chờ công bố</span>}
                           {s.feedbackAt && <span className="book-badge">Đã chữa</span>}
                         </div>
                         <div className="cell-sub">{s.studentUsername}</div>
@@ -499,6 +508,17 @@ export function TeacherPage() {
                 </div>
               </div>
 
+              <div className="field">
+                <label>Cách thông báo kết quả cho học sinh</label>
+                <select
+                  value={assignResultMode}
+                  onChange={(e) => setAssignResultMode(e.target.value as ResultReleaseMode)}
+                >
+                  <option value="immediate">Báo điểm & lời giải chi tiết ngay sau khi nộp</option>
+                  <option value="after-review">Chờ gia sư xem, chữa bài và xác nhận công bố mới báo kết quả</option>
+                </select>
+              </div>
+
               <div>
                 <button type="submit" className="btn-primary">
                   <Plus size={16} /> Giao đề
@@ -529,7 +549,10 @@ export function TeacherPage() {
                         <td><strong>{a.studentName}</strong></td>
                         <td>
                           <div>{a.examTitle}</div>
-                          {a.note && <div className="cell-sub">{a.note}</div>}
+                          <div className="cell-sub">
+                            {a.resultMode === 'after-review' ? 'Chờ gia sư duyệt mới báo điểm' : 'Báo điểm ngay'}
+                            {a.note ? ` · ${a.note}` : ''}
+                          </div>
                         </td>
                         <td className="cell-nowrap">
                           {a.dueAt ? new Date(a.dueAt).toLocaleString('vi-VN') : 'Không giới hạn'}
@@ -681,9 +704,29 @@ export function TeacherPage() {
                   {' · '}Đúng {inspectSub.correctCount}/{inspectSub.totalQuestions} câu · {formatDuration(inspectSub.durationSeconds)}
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button type="button" className="btn-primary btn-sm" disabled={fbSaving} onClick={handleSaveFeedback}>
-                  <Save size={15} /> {fbSaving ? 'Đang lưu...' : 'Lưu chữa bài'}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {!inspectSub.publishedAt && (
+                  <button
+                    type="button"
+                    className="btn-secondary btn-sm"
+                    disabled={fbSaving}
+                    onClick={() => void handleSaveFeedback(false)}
+                  >
+                    Lưu nháp
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn-primary btn-sm"
+                  disabled={fbSaving}
+                  onClick={() => void handleSaveFeedback(true)}
+                >
+                  <Save size={15} />{' '}
+                  {fbSaving
+                    ? 'Đang lưu...'
+                    : inspectSub.publishedAt
+                      ? 'Lưu chữa bài'
+                      : 'Xác nhận & Công bố điểm'}
                 </button>
                 <button type="button" className="icon-btn" onClick={() => setInspectSub(null)}>
                   <X size={18} />

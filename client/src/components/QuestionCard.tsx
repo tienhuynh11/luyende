@@ -36,10 +36,12 @@ export function QuestionCard({
 
   const typeLabel =
     question.type === 'mcq'
-      ? 'Trắc nghiệm 4 lựa chọn'
-      : question.type === 'true-false'
-        ? 'Trắc nghiệm Đúng / Sai'
-        : 'Trả lời ngắn';
+      ? 'Chọn 1 đáp án'
+      : question.type === 'multi-select'
+        ? 'Chọn nhiều đáp án'
+        : question.type === 'true-false'
+          ? 'Trắc nghiệm Đúng / Sai'
+          : 'Trả lời ngắn';
 
   const statusBadge = reveal && result ? (
     result.isFullyCorrect ? (
@@ -108,6 +110,46 @@ export function QuestionCard({
                 onClick={() => onChangeAnswer({ type: 'mcq', selectedIndex: optIdx })}
               >
                 <span className="mcq-letter">{OPTION_LABELS[optIdx]}</span>
+                <span className="mcq-text">
+                  <MathText text={opt} />
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* PHẦN I-B: MULTI-SELECT (CHỌN NHIỀU ĐÁP ÁN) */}
+      {question.type === 'multi-select' && (
+        <div className="mcq-grid">
+          {question.options.map((opt, optIdx) => {
+            const currentSet = answer?.type === 'multi-select' ? answer.selectedIndices : [];
+            const selected = currentSet.includes(optIdx);
+            const isCorrect = question.correctIndices.includes(optIdx);
+            let stateClass = '';
+            if (reveal) {
+              if (isCorrect) stateClass = 'correct';
+              else if (selected && !isCorrect) stateClass = 'wrong';
+            } else if (selected) {
+              stateClass = 'selected';
+            }
+
+            const toggleOpt = () => {
+              const next = selected
+                ? currentSet.filter((i) => i !== optIdx)
+                : [...currentSet, optIdx].sort((a, b) => a - b);
+              onChangeAnswer({ type: 'multi-select', selectedIndices: next });
+            };
+
+            return (
+              <button
+                key={optIdx}
+                type="button"
+                disabled={disabled}
+                className={`mcq-opt ${stateClass}`}
+                onClick={toggleOpt}
+              >
+                <span className="mcq-letter">{selected ? '✓' : OPTION_LABELS[optIdx]}</span>
                 <span className="mcq-text">
                   <MathText text={opt} />
                 </span>

@@ -1,4 +1,4 @@
-import { Bell, BookOpen, ClipboardList, History, LogIn, LogOut, Moon, Radio, Sun } from 'lucide-react';
+import { Bell, BookMarked, BookOpen, ClipboardList, History, LogIn, LogOut, Moon, Radio, Sun } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { apiMarkAllReviewed } from '../lib/api';
@@ -22,6 +22,7 @@ export function Layout({ theme, onToggleTheme, children }: LayoutProps) {
   const isHistory = location.pathname === '/lich-su';
   const isTeacher = location.pathname.startsWith('/giao-vien');
   const isLive = location.pathname === '/day-hoc';
+  const isTheory = location.pathname === '/ly-thuyet';
   const isLogin = location.pathname === '/dang-nhap';
 
   useEffect(() => {
@@ -73,6 +74,11 @@ export function Layout({ theme, onToggleTheme, children }: LayoutProps) {
               <Link to="/giao-vien" className={`nav-link desktop-only ${isTeacher ? 'active' : ''}`}>
                 Giao bài & Điểm
                 {notifications.length > 0 && <span className="nav-count">{notifications.length}</span>}
+              </Link>
+            )}
+            {user && (
+              <Link to="/ly-thuyet" className={`nav-link desktop-only ${isTheory ? 'active' : ''}`}>
+                Lý thuyết
               </Link>
             )}
             {user && (
@@ -193,6 +199,13 @@ export function Layout({ theme, onToggleTheme, children }: LayoutProps) {
               {notifications.length > 0 && <i className="mb-dot">{notifications.length}</i>}
             </span>
             <span>Giao bài</span>
+          </Link>
+        )}
+
+        {user && (
+          <Link to="/ly-thuyet" className={`mb-item ${isTheory ? 'active' : ''}`}>
+            <BookMarked size={20} />
+            <span>Lý thuyết</span>
           </Link>
         )}
 

@@ -68,11 +68,13 @@ export function HistoryPage() {
           durationSeconds: s.durationSeconds,
           submittedAt: new Date(s.submittedAt).getTime(),
           hasFeedback: Boolean(s.feedbackAt),
+          isPublished: Boolean(s.publishedAt),
           fromServer: true,
         }))
       : localProgress.attempts.map((a) => ({
           ...a,
           hasFeedback: false,
+          isPublished: true,
           fromServer: false,
         }));
 
@@ -184,16 +186,20 @@ export function HistoryPage() {
                   </td>
                   <td>Lớp {att.grade}</td>
                   <td>
-                    <span className={`score-badge ${att.score >= 8 ? 'good' : att.score >= 5 ? 'warn' : 'bad'}`}>
-                      {att.score.toFixed(2)}
-                    </span>
+                    {att.isPublished ? (
+                      <span className={`score-badge ${att.score >= 8 ? 'good' : att.score >= 5 ? 'warn' : 'bad'}`}>
+                        {att.score.toFixed(2)}
+                      </span>
+                    ) : (
+                      <span className="book-badge">Chờ chấm</span>
+                    )}
                   </td>
-                  <td>{att.correctCount}/{att.totalQuestions}</td>
+                  <td>{att.isPublished ? `${att.correctCount}/${att.totalQuestions}` : '—'}</td>
                   <td>{formatDuration(att.durationSeconds)}</td>
                   <td className="cell-nowrap">{new Date(att.submittedAt).toLocaleString('vi-VN')}</td>
                   <td>
                     <div style={{ display: 'flex', gap: 6 }}>
-                      {att.fromServer && (
+                      {att.fromServer && att.isPublished && (
                         <button
                           type="button"
                           className="btn-secondary btn-sm"

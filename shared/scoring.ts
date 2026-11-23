@@ -47,7 +47,7 @@ export function isShortAnswerCorrect(input: string, accepted: string[]): boolean
 
 export function getQuestionWeight(q: Question): number {
   if (q.type === 'true-false') return 4; // Equivalent to 1.0 pt when MCQ is 0.25 pt
-  if (q.type === 'short-answer') return 2; // Equivalent to 0.5 pt
+  if (q.type === 'short-answer' || q.type === 'multi-select') return 2; // Equivalent to 0.5 pt
   return 1; // MCQ = 1 unit
 }
 
@@ -66,6 +66,20 @@ export function gradeQuestion(q: Question, answer: UserAnswer | undefined, unitP
       maxPoints,
       isFullyCorrect: ok,
       isAnswered: answer.selectedIndex >= 0,
+    };
+  }
+
+  if (q.type === 'multi-select' && answer.type === 'multi-select') {
+    const chosen = Array.from(new Set(answer.selectedIndices)).sort((a, b) => a - b);
+    const expected = Array.from(new Set(q.correctIndices)).sort((a, b) => a - b);
+    const ok =
+      chosen.length === expected.length && chosen.every((val, idx) => val === expected[idx]);
+    return {
+      questionId: q.id,
+      earnedPoints: ok ? maxPoints : 0,
+      maxPoints,
+      isFullyCorrect: ok,
+      isAnswered: chosen.length > 0,
     };
   }
 

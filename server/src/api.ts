@@ -22,6 +22,7 @@ import {
   deleteOrHideStoredExam,
   deleteSession,
   deleteStudentAccount,
+  deleteTheoryNote,
   findAccountByUsername,
   getAccountBySessionToken,
   getNotificationsForUser,
@@ -31,10 +32,12 @@ import {
   getTeacherDashboard,
   isDbEnabled,
   listStoredExams,
+  listTheoryNotesForUser,
   markAllSubmissionsReviewed,
   saveSubmission,
   saveSubmissionFeedback,
   upsertStoredExam,
+  upsertTheoryNote,
 } from './db.js';
 import {
   applyLiveAction,
@@ -248,6 +251,12 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
       return sendJson(res, 200, { ok: true });
     }
 
+    // Theory notes (accessible to both teacher & student)
+    if (path === '/api/theory' && req.method === 'GET') {
+      const notes = await listTheoryNotesForUser(user);
+      return sendJson(res, 200, { notes });
+    }
+
     // Student views their own submission & teacher's feedback
     if (path.startsWith('/api/student/submissions/') && req.method === 'GET') {
       const subId = decodeURIComponent(path.slice('/api/student/submissions/'.length));
@@ -356,6 +365,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
           grade?: number;
           note?: string;
           dueAt?: string | null;
+          resultMode?: 'immediate' | 'after-review';
         }>(req);
 
         if (!body.examId || !body.examTitle || !isValidGrade(Number(body.grade))) {
@@ -370,6 +380,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
           grade: Number(body.grade) as GradeLevel,
           note: (body.note ?? '').trim().slice(0, 300),
           dueAt,
+          resultMode: body.resultMode === 'after-review' ? 'after-review' : 'immediate',
         });
         return sendJson(res, 201, { assignment });
       }
@@ -393,6 +404,7 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
           teacherNote?: string;
           questionNotes?: Record<string, string>;
           adjustedScore?: number | null;
+          publishResult?: boolean;
         }>(req);
         const updated = await saveSubmissionFeedback(subId, {
           teacherNote: body.teacherNote ?? '',
@@ -401,9 +413,44 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, path:
             body.adjustedScore === null || body.adjustedScore === undefined || String(body.adjustedScore) === ''
               ? null
               : Number(body.adjustedScore),
+          publishResult: Boolean(body.publishResult),
         });
         if (!updated) return sendJson(res, 404, { error: 'Không tìm thấy bài làm.' });
         return sendJson(res, 200, { submission: updated });
+      }
+
+      if (path === '/api/teacher/theory' && req.method === 'POST') {
+        const body = await readJson<{
+          id?: string;
+          studentId?: string | null;
+          subjectId?: string;
+          grade?: number;
+          title?: string;
+          summary?: string;
+          content?: string;
+          imageDataUrl?: string | null;
+        }>(req, 3 * 1024 * 1024);
+
+        if (!body.title?.trim() || !isValidGrade(Number(body.grade))) {
+          return sendJson(res, 400, { error: 'Bài lý thuyết cần có tiêu đề và khối lớp (6–9).' });
+        }
+        const note = await upsertTheoryNote(user.id, {
+          id: body.id,
+          studentId: body.studentId ? String(body.studentId) : null,
+          subjectId: (body.subjectId || 'toan') as Exam['subjectId'],
+          grade: Number(body.grade) as GradeLevel,
+          title: body.title,
+          summary: body.summary ?? '',
+          content: body.content ?? '',
+          imageDataUrl: body.imageDataUrl ?? null,
+        });
+        return sendJson(res, 200, { note });
+      }
+
+      if (path.startsWith('/api/teacher/theory/') && req.method === 'DELETE') {
+        const noteId = decodeURIComponent(path.slice('/api/teacher/theory/'.length));
+        const ok = await deleteTheoryNote(user.id, noteId);
+        return ok ? sendJson(res, 200, { ok: true }) : sendJson(res, 404, { error: 'Không tìm thấy bài lý thuyết.' });
       }
 
       if (path.startsWith('/api/teacher/submissions/') && req.method === 'GET') {

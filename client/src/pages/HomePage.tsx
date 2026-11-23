@@ -200,6 +200,8 @@ export function HomePage() {
                         <span className={`score-badge ${a.myBestScore! >= 8 ? 'good' : a.myBestScore! >= 5 ? 'warn' : 'bad'}`}>
                           Đã nộp: {a.myBestScore!.toFixed(2)}đ
                         </span>
+                      ) : a.myPendingReview ? (
+                        <span className="book-badge">Đã nộp · Chờ gia sư chấm</span>
                       ) : (
                         <span className="tag-pending">Chưa làm</span>
                       )}
@@ -208,7 +210,7 @@ export function HomePage() {
                         className="btn-primary btn-sm"
                         onClick={() => navigate(`/de/${a.examId}?mode=exam&assignment=${a.id}`)}
                       >
-                        {isDone ? 'Làm lại' : 'Làm bài'}
+                        {isDone || a.myPendingReview ? 'Làm lại' : 'Làm bài'}
                       </button>
                     </div>
                   </div>

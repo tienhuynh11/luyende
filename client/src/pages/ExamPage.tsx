@@ -67,6 +67,7 @@ export function ExamPage() {
     initialDraft?.remainingSeconds ?? (exam ? exam.durationMinutes * 60 : 900),
   );
   const [submitted, setSubmitted] = useState(false);
+  const [resultPublished, setResultPublished] = useState(true);
   const [syncSaved, setSyncSaved] = useState<'idle' | 'saved' | 'error'>('idle');
   const [reviewFilter, setReviewFilter] = useState<'all' | 'wrong'>('all');
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
@@ -175,8 +176,9 @@ export function ExamPage() {
         durationSeconds: elapsed,
         answers,
       })
-        .then(() => {
+        .then((res) => {
           setSyncSaved('saved');
+          setResultPublished(res.published);
           void refreshNotifications();
         })
         .catch(() => setSyncSaved('error'));
@@ -193,6 +195,7 @@ export function ExamPage() {
     setStartedAt(Date.now());
     setRemainingSeconds(exam.durationMinutes * 60);
     setSubmitted(false);
+    setResultPublished(true);
     setSyncSaved('idle');
     setReviewFilter('all');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -236,7 +239,7 @@ export function ExamPage() {
         const isAns = Boolean(res?.isAnswered);
         const isFlg = flagged.includes(q.id);
         let cls = 'q-nav-btn';
-        if (submitted) {
+        if (submitted && resultPublished) {
           cls += res?.isFullyCorrect ? ' good' : ' bad';
         } else {
           if (isAns) cls += ' answered';
@@ -293,7 +296,13 @@ export function ExamPage() {
       <div className="mobile-exam-bar">
         <div className={`timer-pill ${remainingSeconds < 300 && mode === 'exam' && !submitted ? 'urgent' : ''}`}>
           <Clock size={15} />
-          {submitted ? `${graded.score.toFixed(2)} / 10đ` : mode === 'exam' ? formatTime(remainingSeconds) : 'Luyện tập'}
+          {submitted
+            ? resultPublished
+              ? `${graded.score.toFixed(2)} / 10đ`
+              : 'Đã nộp bài'
+            : mode === 'exam'
+              ? formatTime(remainingSeconds)
+              : 'Luyện tập'}
         </div>
         <button type="button" className="btn-secondary btn-sm" onClick={() => setMobileSheetOpen(true)}>
           <LayoutGrid size={15} /> Phiếu ({answeredCount}/{exam.questions.length})
@@ -309,7 +318,21 @@ export function ExamPage() {
         )}
       </div>
 
-      {submitted && (
+      {submitted && !resultPublished && (
+        <section className="panel" style={{ marginBottom: 18, borderLeft: '3px solid var(--accent)' }}>
+          <h2 style={{ marginBottom: 6 }}>Đã nộp bài thành công</h2>
+          <p className="muted-text" style={{ marginBottom: 14 }}>
+            Đề này đang ở chế độ <strong>chờ gia sư xem và xác nhận công bố kết quả</strong>. Khi gia sư chấm chữa và
+            xác nhận xong, điểm số cùng lời giải chi tiết sẽ hiển thị ở mục <strong>Lịch sử</strong> và báo ở chuông
+            thông báo.
+          </p>
+          <button type="button" className="btn-primary btn-sm" onClick={() => navigate('/')}>
+            Quay về bài tập được giao
+          </button>
+        </section>
+      )}
+
+      {submitted && resultPublished && (
         <section className="result-banner">
           <div className="result-score-col">
             <div className="result-score-box">
@@ -353,7 +376,7 @@ export function ExamPage() {
 
       <div className="exam-layout">
         <div className="exam-questions-col">
-          {submitted && (
+          {submitted && resultPublished && (
             <div className="review-filter-bar">
               <span>Đáp án & Lời giải chi tiết</span>
               <div className="cat-pills">
@@ -385,7 +408,7 @@ export function ExamPage() {
                 index={i}
                 answer={answers[q.id]}
                 result={resultMap.get(q.id)}
-                showSolution={submitted}
+                showSolution={submitted && resultPublished}
                 isFlagged={flagged.includes(q.id)}
                 isPracticeMode={mode === 'practice'}
                 isCheckedInPractice={Boolean(checkedPracticeIds[q.id])}
@@ -420,8 +443,8 @@ export function ExamPage() {
               </div>
             ) : (
               <div className="sidebar-score">
-                <small>Điểm số</small>
-                <strong>{graded.score.toFixed(2)} / 10</strong>
+                <small>{resultPublished ? 'Điểm số' : 'Trạng thái'}</small>
+                <strong>{resultPublished ? `${graded.score.toFixed(2)} / 10` : 'Chờ gia sư chấm'}</strong>
               </div>
             )}
 

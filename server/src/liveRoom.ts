@@ -181,8 +181,8 @@ export function applyLiveAction(user: AccountPublic, action: LiveActionPayload):
   }
 
   if (action.type === 'add-item') {
-    if (user.role !== 'teacher' && !state.studentCanDraw) {
-      return { ok: false, error: 'Gia sư đang khóa quyền viết bảng của học sinh.' };
+    if (user.role !== 'teacher' && (!state.active || !state.studentCanDraw)) {
+      return { ok: false, error: 'Phòng chưa mở hoặc gia sư đang khóa quyền viết bảng.' };
     }
     const page = currentPage();
     let item: WhiteboardItem;
@@ -290,6 +290,9 @@ export function applyLiveAction(user: AccountPublic, action: LiveActionPayload):
   }
 
   if (action.type === 'chat') {
+    if (user.role !== 'teacher' && !state.active) {
+      return { ok: false, error: 'Phòng dạy trực tiếp chưa mở.' };
+    }
     const text = (action.text ?? '').trim().slice(0, 1000);
     if (!text) return { ok: false, error: 'Nội dung trống.' };
     const msg: LiveChatMessage = {

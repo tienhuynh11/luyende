@@ -29,6 +29,8 @@ export interface StudentSummary {
   avgScore: number | null;
 }
 
+export type ResultReleaseMode = 'immediate' | 'after-review';
+
 export interface AssignmentInfo {
   id: string;
   teacherId: string;
@@ -40,10 +42,12 @@ export interface AssignmentInfo {
   grade: GradeLevel;
   note: string;
   dueAt: string | null;
+  resultMode: ResultReleaseMode;
   createdAt: string;
   submissionCount?: number;
   myBestScore?: number | null;
   mySubmittedAt?: string | null;
+  myPendingReview?: boolean;
 }
 
 export interface SubmissionRecord {
@@ -68,6 +72,22 @@ export interface SubmissionRecord {
   submittedAt: string;
   reviewedAt: string | null;
   feedbackAt: string | null;
+  publishedAt: string | null; // null = đang chờ gia sư xác nhận công bố kết quả
+}
+
+export interface TheoryNote {
+  id: string;
+  teacherId: string;
+  teacherName?: string;
+  studentId: string | null; // null = tất cả học sinh
+  studentName?: string;
+  subjectId: SubjectId;
+  grade: GradeLevel;
+  title: string;
+  summary: string;
+  content: string; // Markdown + KaTeX $...$ / $$...$$
+  imageDataUrl: string | null;
+  updatedAt: string;
 }
 
 export interface NotificationItem {
@@ -190,7 +210,18 @@ export interface ShortAnswerQuestion {
   difficulty: DifficultyLevel;
 }
 
-export type Question = McqQuestion | TrueFalseQuestion | ShortAnswerQuestion;
+export interface MultiSelectQuestion {
+  id: string;
+  type: 'multi-select';
+  prompt: string;
+  options: [string, string, string, string];
+  correctIndices: number[]; // e.g. [0, 2]
+  explanation: string;
+  topic: string;
+  difficulty: DifficultyLevel;
+}
+
+export type Question = McqQuestion | MultiSelectQuestion | TrueFalseQuestion | ShortAnswerQuestion;
 
 export interface Exam {
   id: string;
@@ -210,6 +241,7 @@ export interface Exam {
 
 export type UserAnswer =
   | { type: 'mcq'; selectedIndex: number }
+  | { type: 'multi-select'; selectedIndices: number[] }
   | { type: 'true-false'; values: Record<'a' | 'b' | 'c' | 'd', boolean | null> }
   | { type: 'short-answer'; text: string };
 

@@ -11,6 +11,7 @@ import { HomePage } from './pages/HomePage';
 import { LiveClassPage } from './pages/LiveClassPage';
 import { LoginPage } from './pages/LoginPage';
 import { TeacherPage } from './pages/TeacherPage';
+import { TheoryPage } from './pages/TheoryPage';
 
 export function App() {
   const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
@@ -33,6 +34,7 @@ export function App() {
               <Route path="/giao-vien/tao-de" element={<ExamEditorPage />} />
               <Route path="/giao-vien/sua-de/:examId" element={<ExamEditorPage />} />
               <Route path="/day-hoc" element={<LiveClassPage />} />
+              <Route path="/ly-thuyet" element={<TheoryPage />} />
               <Route path="/de/:examId" element={<ExamPage />} />
               <Route path="/de/random/:grade/:seed" element={<ExamPage />} />
               <Route path="/lich-su" element={<HistoryPage />} />
